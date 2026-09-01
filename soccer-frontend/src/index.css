@@ -1,0 +1,16 @@
+@import "tailwindcss";
+
+/* Oculta la barra de scroll visual mientras se mantiene el desplazamiento
+   (rueda, touch o arrastre con useDragScroll). "Deslizante", sin rieles. */
+.scroll-slide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+  overscroll-behavior: contain;
+}
+.scroll-slide::-webkit-scrollbar {
+  display: none;
+}
+.scroll-slide.dragging {
+  cursor: grabbing;
+  user-select: none;
+}
