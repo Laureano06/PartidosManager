@@ -76,7 +76,12 @@ function TarjetaPosicion({ multiclub }) {
 }
 
 function FormularioOperacion({ idEquipo, contraparte, operacion, onCerrar, onConfirmado, API_URL, tuPorcentaje }) {
-  const [porcentaje, setPorcentaje] = useState(operacion === 'VENDER' ? Math.min(5, tuPorcentaje) : 5);
+  // El input guarda el TEXTO tal cual lo escribe el usuario (puede estar
+  // vacío mientras borra) — convertirlo a Number en el propio value hacía
+  // que borrar el campo lo pisara con "0" y el siguiente dígito quedara
+  // pegado atrás ("0" + dígito).
+  const [porcentajeTexto, setPorcentajeTexto] = useState(String(operacion === 'VENDER' ? Math.min(5, tuPorcentaje) : 5));
+  const porcentaje = parseInt(porcentajeTexto, 10) || 0;
   const [cotizacion, setCotizacion] = useState(null);
   const [cargando, setCargando] = useState(false);
   const [enviando, setEnviando] = useState(false);
@@ -124,8 +129,8 @@ function FormularioOperacion({ idEquipo, contraparte, operacion, onCerrar, onCon
         <div>
           <label className="text-xs text-slate-400 block mb-1">Puntos porcentuales</label>
           <input
-            type="number" min={1} max={operacion === 'VENDER' ? tuPorcentaje : 100 - (cotizacion?.porcentaje_actual ?? tuPorcentaje)} value={porcentaje}
-            onChange={(e) => setPorcentaje(Number(e.target.value))}
+            type="number" min={1} max={operacion === 'VENDER' ? tuPorcentaje : 100 - (cotizacion?.porcentaje_actual ?? tuPorcentaje)} value={porcentajeTexto}
+            onChange={(e) => setPorcentajeTexto(e.target.value)}
             className="w-full bg-[#0b1326] border border-slate-700 p-2.5 rounded-lg text-white text-sm"
           />
         </div>
