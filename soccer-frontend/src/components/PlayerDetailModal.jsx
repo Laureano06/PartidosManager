@@ -233,9 +233,9 @@ export default function PlayerDetailModal({ jugador, open, onClose, API_URL, onN
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-[auto,1fr] gap-6">
-          <div className="flex flex-col items-center gap-4 lg:w-40">
+          <div className="flex flex-row items-start gap-4 lg:w-72">
             <MiniPitchPosicion posicion={datos.posicion} posicionEspecifica={datos.posicion_especifica} />
-            <div className="w-full text-xs space-y-0">
+            <div className="flex-1 text-xs space-y-0 min-w-0">
               <Stat label="Edad" value={datos.edad} />
               <Stat label="Energía" value={datos.energia != null ? `${datos.energia}%` : null} />
               <Stat label="Moral" value={datos.moral != null ? `${datos.moral}%` : null} />
