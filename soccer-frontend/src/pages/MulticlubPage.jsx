@@ -87,8 +87,15 @@ function FormularioOperacion({ idEquipo, contraparte, operacion, onCerrar, onCon
   const [enviando, setEnviando] = useState(false);
   const [error, setError] = useState(null);
 
+  // El atributo `max` del <input type="number"> es solo cosmético — no
+  // bloquea que se escriba un valor mayor. Acá se valida de verdad: si te
+  // pasás, ni se cotiza (evita mandarle al backend algo que va a rechazar
+  // en silencio) y se avisa por qué.
+  const maxPermitido = operacion === 'VENDER' ? tuPorcentaje : 100 - (cotizacion?.porcentaje_actual ?? tuPorcentaje);
+  const excedido = porcentaje > maxPermitido;
+
   useEffect(() => {
-    if (!porcentaje || porcentaje <= 0) { setCotizacion(null); return; }
+    if (!porcentaje || porcentaje <= 0 || excedido) { setCotizacion(null); return; }
     setCargando(true);
     const params = new URLSearchParams({
       id_equipo_iniciador: idEquipo, id_equipo_contraparte: contraparte.id_equipo, operacion, porcentaje: String(porcentaje),
@@ -98,9 +105,11 @@ function FormularioOperacion({ idEquipo, contraparte, operacion, onCerrar, onCon
       .then(setCotizacion)
       .catch(() => setCotizacion(null))
       .finally(() => setCargando(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [porcentaje, idEquipo, contraparte.id_equipo, operacion, API_URL]);
 
   const confirmar = async () => {
+    if (!porcentaje || porcentaje <= 0 || excedido) return;
     setEnviando(true);
     setError(null);
     try {
@@ -127,16 +136,23 @@ function FormularioOperacion({ idEquipo, contraparte, operacion, onCerrar, onCon
           {operacion === 'COMPRAR' ? 'Comprar participación en' : 'Vender participación en'} {contraparte.nombre}
         </h3>
         <div>
-          <label className="text-xs text-slate-400 block mb-1">Puntos porcentuales</label>
+          <label className="text-xs text-slate-400 block mb-1">Puntos porcentuales (máximo {maxPermitido}%)</label>
           <input
-            type="number" min={1} max={operacion === 'VENDER' ? tuPorcentaje : 100 - (cotizacion?.porcentaje_actual ?? tuPorcentaje)} value={porcentajeTexto}
+            type="number" min={1} max={maxPermitido} value={porcentajeTexto}
             onChange={(e) => setPorcentajeTexto(e.target.value)}
-            className="w-full bg-[#0b1326] border border-slate-700 p-2.5 rounded-lg text-white text-sm"
+            className={`w-full bg-[#0b1326] border p-2.5 rounded-lg text-white text-sm ${excedido ? 'border-rose-500' : 'border-slate-700'}`}
           />
+          {excedido && (
+            <p className="text-xs text-rose-400 mt-1">
+              {operacion === 'VENDER'
+                ? `No podés vender más de lo que tenés (${maxPermitido}%).`
+                : `No podés superar el 100% total — como máximo podés comprar ${maxPermitido}%.`}
+            </p>
+          )}
         </div>
         <div className="bg-[#0b1326] border border-slate-800 rounded-xl p-3 text-xs space-y-1">
           {cargando && <p className="text-slate-500">Cotizando...</p>}
-          {!cargando && cotizacion && (
+          {!cargando && !excedido && cotizacion && (
             <>
               <p className="text-slate-400">Valor estimado del club: <span className="text-slate-200 font-bold">${cotizacion.valor_club.toLocaleString('es-AR')}</span></p>
               <p className="text-slate-400">Tu participación actual: <span className="text-slate-200 font-bold">{cotizacion.porcentaje_actual}%</span></p>
@@ -157,7 +173,7 @@ function FormularioOperacion({ idEquipo, contraparte, operacion, onCerrar, onCon
         <div className="flex gap-2">
           <button
             onClick={confirmar}
-            disabled={enviando || !cotizacion}
+            disabled={enviando || !cotizacion || excedido}
             className="flex-1 bg-sky-500 hover:bg-sky-400 disabled:opacity-50 text-slate-950 font-bold px-4 py-2.5 rounded-lg text-sm"
           >
             {enviando ? 'Enviando...' : 'Elevar a la directiva'}
