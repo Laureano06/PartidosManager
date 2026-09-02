@@ -232,18 +232,19 @@ export default function PlayerDetailModal({ jugador, open, onClose, API_URL, onN
           </div>
         </div>
 
-        <div className="grid grid-cols-[140px_1fr] gap-4 sm:gap-6 items-start">
-          <MiniPitchPosicion posicion={datos.posicion} posicionEspecifica={datos.posicion_especifica} />
-
+        <div className="grid grid-cols-[160px_1fr] gap-4 sm:gap-6 items-start">
           <div className="space-y-4">
-            <div className="grid grid-cols-2 sm:grid-cols-5 gap-x-4 gap-y-1 text-xs bg-[#0b1326] border border-slate-800 rounded-2xl p-4">
+            <MiniPitchPosicion posicion={datos.posicion} posicionEspecifica={datos.posicion_especifica} />
+            <div className="text-xs space-y-0">
               <Stat label="Edad" value={datos.edad} />
               <Stat label="Energía" value={datos.energia != null ? `${datos.energia}%` : null} />
               <Stat label="Moral" value={datos.moral != null ? `${datos.moral}%` : null} />
               <Stat label="Valor" value={`$${(datos.val ?? datos.valor_mercado ?? 0).toLocaleString('es-AR')}`} />
               <Stat label="Salario/sem" value={`$${(datos.sal ?? datos.salario ?? 0).toLocaleString('es-AR')}`} />
             </div>
+          </div>
 
+          <div className="space-y-4">
             {desgloseDisponible ? (
               <div className="space-y-4">
                 <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
