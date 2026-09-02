@@ -73,6 +73,7 @@ class EquipoOut(BaseModel):
     color: str
     escudo_url: str | None = None
     es_usuario: bool
+    reputacion: int
     presupuesto_fichajes: int
     presupuesto_salarios: int
     puntos: int
@@ -110,9 +111,11 @@ class EntrenamientoIn(BaseModel):
     intensidad: str
 
 
-class SolicitarObraIn(BaseModel):
-    id_equipo: int
-    tipo_instalacion: str
+class OfertaParticipacionIn(BaseModel):
+    id_equipo_iniciador: int
+    id_equipo_contraparte: int
+    operacion: str   # COMPRAR | VENDER
+    porcentaje: int
 
 
 class OfertaIn(BaseModel):

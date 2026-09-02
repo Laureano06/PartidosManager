@@ -30,18 +30,19 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from database import engine, AsyncSessionLocal, Base
 from models import (
     Equipo, Jugador, Tactica, PlanEntrenamiento, PersonalTecnico, Ojeador,
-    Calendario, Liga, Partida, Mensaje, CicloTemporada,
+    Calendario, Liga, Partida, Mensaje, CicloTemporada, AfiliacionClub,
 )
 from engine.data_gen import (
     LIGAS, CLUB_NAMES, CONFEDERACION, color_para_indice, gen_squad, gen_squad_mixto,
     gen_player_real, clasificar_plantel,
     nivel_club, factor_overall_liga, presupuesto_club, objetivo_por_nivel, reputacion_club,
-    nivel_inicial_instalacion, random_name, random_nation,
+    random_name, random_nation,
 )
 from engine.copa_engine import (
     COMPETENCIAS, OFFSET_SEMANAS_GRUPO, fecha_ronda, seleccionar_participantes,
     armar_grupos, fixtures_grupo,
 )
+from engine.multiclub_engine import AFILIACIONES_CURADAS, GRUPOS_MARCA_CURADOS
 
 OJEADORES_POR_CLUB = 3
 LIGAS_COMPLETAS_DEFAULT = ["ARG1", "BRA1", "ESP1", "ING1"]
@@ -212,6 +213,10 @@ async def crear_partida(
 
     equipos_candidatos_usuario: list[Equipo] = []
     nivel_por_equipo: dict[int, float] = {}
+    # Ligas ficticias (no personalizadas) de esta partida — las afiliaciones
+    # multiclub curadas solo se siembran ahí, porque el código de club es
+    # recuperable del prefijo de Equipo.nombre (ver más abajo).
+    ligas_ficticias: set[str] = set()
 
     for codigo_liga in LIGAS:
         info = LIGAS[codigo_liga]
@@ -224,6 +229,8 @@ async def crear_partida(
         await session.flush()  # asigna id_liga
 
         es_custom = codigo_liga in (nombres_clubes_custom or {})
+        if not es_custom:
+            ligas_ficticias.add(codigo_liga)
         clubes = (nombres_clubes_custom or {}).get(codigo_liga) or CLUB_NAMES[codigo_liga]
         niveles = [nivel_club(i, len(clubes)) for i in range(len(clubes))]
 
@@ -240,7 +247,6 @@ async def crear_partida(
             escudo_url = fila[2] if len(fila) >= 3 and fila[2] else None
             presupuesto = presupuesto_club(codigo_liga, niveles[i])
             reputacion_eq = reputacion_club(codigo_liga, niveles[i])
-            nivel_infra = nivel_inicial_instalacion(reputacion_eq)
             eq = Equipo(
                 id_partida=partida.id_partida,
                 id_liga=liga.id_liga,
@@ -257,12 +263,6 @@ async def crear_partida(
                 presupuesto_salarios=round(presupuesto * 0.3 / 10_000) * 10_000,
                 reputacion=reputacion_eq,
                 escudo_url=escudo_url,
-                nivel_centro_entrenamiento=nivel_infra,
-                nivel_centro_medico=nivel_infra,
-                nivel_analitica=nivel_infra,
-                nivel_captacion_juvenil=nivel_infra,
-                nivel_instalaciones_juveniles=nivel_infra,
-                nivel_entrenadores_juveniles=nivel_infra,
             )
             session.add(eq)
             equipos.append(eq)
@@ -299,6 +299,33 @@ async def crear_partida(
                 # jugadores a <=180 días de quedar libres (precontrato).
                 pdata["fecha_fin_contrato"] = FECHA_BASE_CONTRATOS + timedelta(days=random.randint(60, 4 * 365))
                 session.add(Jugador(id_partida=partida.id_partida, id_equipo=eq.id_equipo, **pdata))
+
+    # Afiliaciones multiclub curadas (ver engine/multiclub_engine.py) — recién
+    # acá existen TODOS los Equipo de TODAS las ligas (los pares curados
+    # cruzan liga, ej. MANC es ING1 pero GIR es ESP1), y solo tiene sentido
+    # en ligas ficticias (en "datos personalizados" el código de club no es
+    # recuperable del nombre, que es el nombre real tal cual lo subió el usuario).
+    if ligas_ficticias:
+        filas = (await session.execute(
+            select(Equipo, Liga.codigo).join(Liga, Equipo.id_liga == Liga.id_liga)
+            .where(Liga.id_partida == partida.id_partida, Liga.codigo.in_(ligas_ficticias))
+        )).all()
+        equipo_por_clave = {(codigo_liga_eq, eq.nombre.split(" - ", 1)[0]): eq for eq, codigo_liga_eq in filas}
+
+        for rel in AFILIACIONES_CURADAS:
+            inv = equipo_por_clave.get((rel["liga_inversor"], rel["codigo_inversor"]))
+            part = equipo_por_clave.get((rel["liga_participado"], rel["codigo_participado"]))
+            if inv and part:
+                session.add(AfiliacionClub(
+                    id_partida=partida.id_partida, id_equipo_inversor=inv.id_equipo, id_equipo_participado=part.id_equipo,
+                    porcentaje=rel["porcentaje"], tipo_relacion=rel["tipo"], fecha_adquisicion=FECHA_BASE_CONTRATOS,
+                ))
+
+        for grupo in GRUPOS_MARCA_CURADOS:
+            for liga_codigo, club_codigo in grupo["miembros"]:
+                eq = equipo_por_clave.get((liga_codigo, club_codigo))
+                if eq:
+                    eq.red_marca = grupo["grupo_marca"]
 
     # Elegir el club del usuario: por nombre exacto si se pasó, si no al azar
     # entre los candidatos (los de la liga elegida, o todos si no se eligió).

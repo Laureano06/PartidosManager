@@ -133,18 +133,11 @@ class Equipo(Base):
     goles_favor: Mapped[int] = mapped_column(Integer, default=0)
     goles_contra: Mapped[int] = mapped_column(Integer, default=0)
 
-    # Infraestructura del club: 6 instalaciones, nivel 0-20 cada una. Suben
-    # mediante SolicitudObra (aprobación de la directiva, no es instantáneo)
-    # — ver engine/directiva_engine.py::evaluar_solicitud_obra y
-    # _procesar_solicitudes_obra en main.py. El bono que aporta cada una a
-    # su sistema respectivo vive junto a ese sistema (training_engine,
-    # injury_engine, academia_engine, _procesar_progreso_scouting).
-    nivel_centro_entrenamiento: Mapped[int] = mapped_column(Integer, default=0)
-    nivel_centro_medico: Mapped[int] = mapped_column(Integer, default=0)
-    nivel_analitica: Mapped[int] = mapped_column(Integer, default=0)
-    nivel_captacion_juvenil: Mapped[int] = mapped_column(Integer, default=0)
-    nivel_instalaciones_juveniles: Mapped[int] = mapped_column(Integer, default=0)
-    nivel_entrenadores_juveniles: Mapped[int] = mapped_column(Integer, default=0)
+    # Red de marca (estilo Red Bull: RB Leipzig / RB Bragantino) — clubes con
+    # el mismo tag comparten identidad/metodología. NULL = sin red de marca.
+    # No es una relación de accionista (ver AfiliacionClub para eso) y no es
+    # comprable/vendible: se fija una sola vez al generar el mundo.
+    red_marca: Mapped[str | None] = mapped_column(String(30), nullable=True)
 
     jugadores: Mapped[list["Jugador"]] = relationship(
         back_populates="equipo", foreign_keys="Jugador.id_equipo", cascade="all, delete-orphan"
@@ -154,22 +147,44 @@ class Equipo(Base):
     personal_tecnico: Mapped["PersonalTecnico"] = relationship(back_populates="equipo", uselist=False, cascade="all, delete-orphan")
 
 
-class SolicitudObra(Base):
-    """Pedido de mejora de una instalación de infraestructura, pendiente de
-    aprobación de la directiva (tarda, no es instantáneo) — mismo espíritu
-    que OfertaClubDT. Ver engine/directiva_engine.py::evaluar_solicitud_obra
-    y _procesar_solicitudes_obra en main.py (llamado desde avanzar_dia)."""
-    __tablename__ = "solicitudes_obra"
+class AfiliacionClub(Base):
+    """Participación accionaria de un club en otro — cubre los 3 modelos
+    multiclub comprables/vendibles (PROPIETARIO/SATELITE/MINORITARIO, ver
+    engine/multiclub_engine.py::tipo_relacion_por_porcentaje). Una fila por
+    par (inversor, participado); comprar más actualiza el porcentaje en la
+    misma fila en vez de insertar otra."""
+    __tablename__ = "afiliaciones_club"
+
+    id_afiliacion: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    id_partida: Mapped[int] = mapped_column(ForeignKey("partidas.id_partida"))
+    id_equipo_inversor: Mapped[int] = mapped_column(ForeignKey("equipos.id_equipo"))
+    id_equipo_participado: Mapped[int] = mapped_column(ForeignKey("equipos.id_equipo"))
+    porcentaje: Mapped[int] = mapped_column(Integer, nullable=False)
+    tipo_relacion: Mapped[str] = mapped_column(String(15), nullable=False)  # PROPIETARIO, SATELITE, MINORITARIO
+    fecha_adquisicion: Mapped[date] = mapped_column(Date, nullable=False)
+
+
+class SolicitudParticipacion(Base):
+    """Pedido de compra o venta de participación en otro club, con DOS
+    aprobaciones secuenciales: primero tu propia directiva (gastar/aceptar
+    cobrar), después la directiva del club contraparte (ceder/recomprar la
+    participación) — ver engine/multiclub_engine.py::evaluar_directiva_propia
+    / evaluar_directiva_contraparte y _procesar_solicitudes_participacion en
+    main.py (llamado desde avanzar_dia)."""
+    __tablename__ = "solicitudes_participacion"
 
     id_solicitud: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     id_partida: Mapped[int] = mapped_column(ForeignKey("partidas.id_partida"))
-    id_equipo: Mapped[int] = mapped_column(ForeignKey("equipos.id_equipo"))
-    tipo_instalacion: Mapped[str] = mapped_column(String(40), nullable=False)
-    nivel_objetivo: Mapped[int] = mapped_column(Integer, nullable=False)
-    costo: Mapped[int] = mapped_column(Integer, nullable=False)
+    id_equipo_iniciador: Mapped[int] = mapped_column(ForeignKey("equipos.id_equipo"))
+    id_equipo_contraparte: Mapped[int] = mapped_column(ForeignKey("equipos.id_equipo"))
+    operacion: Mapped[str] = mapped_column(String(10), nullable=False)  # COMPRAR, VENDER
+    porcentaje: Mapped[int] = mapped_column(Integer, nullable=False)
+    monto: Mapped[int] = mapped_column(Integer, nullable=False)
     fecha_solicitud: Mapped[date] = mapped_column(Date, nullable=False)
     fecha_resolucion: Mapped[date] = mapped_column(Date, nullable=False)
-    estado: Mapped[str] = mapped_column(String(15), default="PENDIENTE")  # PENDIENTE, APROBADA, RECHAZADA
+    fase: Mapped[str] = mapped_column(String(25), default="DIRECTIVA_PROPIA")  # DIRECTIVA_PROPIA, DIRECTIVA_CONTRAPARTE
+    estado: Mapped[str] = mapped_column(String(25), default="PENDIENTE")
+    # PENDIENTE, RECHAZADA_PROPIA, RECHAZADA_CONTRAPARTE, CONCRETADA
 
 
 class Jugador(Base):

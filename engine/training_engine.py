@@ -18,9 +18,9 @@ _GRUPOS_FOCO = {
 def aplicar_entrenamiento(jugadores: list, foco: str, intensidad: str, bono_centro: float = 0.0) -> None:
     """Modifica in-place los objetos ORM Jugador según el plan de entrenamiento.
 
-    `bono_centro` es el bono de probabilidad de mejora que aporta el nivel
-    del Centro de Entrenamiento del club (0.0 = sin bono), ver
-    engine/directiva_engine.py / nivel_centro_entrenamiento en Equipo."""
+    `bono_centro` es el bono de probabilidad de mejora que aporta la red
+    multiclub del club (0.0 = sin red), ver
+    engine/multiclub_engine.py::bono_red."""
     mult_fatiga = {"BAJA": -10, "MEDIA": 5, "ALTA": 15}.get(intensidad, 5)
     prob_mejora = {"BAJA": 0.05, "MEDIA": 0.08, "ALTA": 0.15}.get(intensidad, 0.08) + bono_centro
 

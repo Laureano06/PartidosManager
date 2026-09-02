@@ -234,35 +234,6 @@ def tope_salarial(presupuesto_fichajes: int) -> int:
     return round(presupuesto_fichajes * 0.3 / 10_000) * 10_000
 
 
-# Costo base de cada instalación de infraestructura (nivel 0-20 cada una,
-# ver Equipo en models.py). Costo de subir un nivel y mantenimiento mensual
-# son fórmulas simples, ajustables acá sin tocar el resto del sistema.
-COSTO_BASE_INSTALACION = {
-    "centro_entrenamiento": 500_000,
-    "centro_medico": 450_000,
-    "analitica": 350_000,
-    "captacion_juvenil": 300_000,
-    "instalaciones_juveniles": 400_000,
-    "entrenadores_juveniles": 300_000,
-}
-
-
-def costo_mejora_instalacion(tipo: str, nivel_actual: int) -> int:
-    """Costo de subir `tipo` de nivel_actual a nivel_actual+1."""
-    base = COSTO_BASE_INSTALACION.get(tipo, 400_000)
-    return round(base * (nivel_actual + 1) ** 1.6 / 1000) * 1000
-
-
-def mantenimiento_mensual_instalacion(tipo: str, nivel: int) -> int:
-    """Mantenimiento mensual aproximado (~2% del costo de ese nivel) — se
-    cobra PRORRATEADO POR DÍA en avanzar_dia (no hay ciclo mensual en el
-    juego), ver _procesar_mantenimiento_infraestructura en main.py."""
-    if nivel <= 0:
-        return 0
-    base = COSTO_BASE_INSTALACION.get(tipo, 400_000)
-    return round(base * nivel ** 1.6 * 0.02)
-
-
 def nivel_desde_reputacion(codigo_liga: str, reputacion: int) -> float:
     """Inversa exacta de reputacion_club: recupera el tier 0.0-1.0 DENTRO DE
     SU PROPIA LIGA a partir de la reputación (que está en escala global,
@@ -286,16 +257,6 @@ def reputacion_club(codigo_liga: str, tier: float) -> int:
     techo = LIGA_TECHO_OVR.get(codigo_liga, 80)
     piso = LIGA_PISO_OVR.get(codigo_liga, 50)
     return round(piso + (techo - piso) * tier)
-
-
-def nivel_inicial_instalacion(reputacion: int) -> int:
-    """Nivel de infraestructura de ARRANQUE acorde al peso real del club —
-    un club grande (reputación alta, ej. un gigante europeo) ya tiene
-    instalaciones de primer nivel desde el vamos, no arranca en cero como
-    si recién hubiera ascendido; uno chico arranca modesto, pero nunca en
-    la nada. Anclado al mismo rango de reputación que reputacion_club
-    (60-94 en todo el juego, ver LIGA_TECHO_OVR/LIGA_PISO_OVR)."""
-    return max(1, min(20, round((reputacion - 60) / 34 * 19) + 1))
 
 
 _PALETA_COLORES = [
