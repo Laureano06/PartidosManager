@@ -17,6 +17,7 @@ import CrearCarreraPage from './pages/CrearCarreraPage';
 import DesarrolloPage from './pages/DesarrolloPage';
 import AcademiaPage from './pages/AcademiaPage';
 import CuerpoTecnicoPage from './pages/CuerpoTecnicoPage';
+import InfraestructuraPage from './pages/InfraestructuraPage';
 import EconomiaPage from './pages/EconomiaPage';
 import MercadoPage from './pages/MercadoPage';
 import BuzonPage from './pages/BuzonPage';
@@ -70,6 +71,7 @@ function GameLayout({
             <Route path="/desarrollo" element={<DesarrolloPage API_URL={API_URL} idEquipoUsuario={idEquipoUsuario} />} />
             <Route path="/academia" element={<AcademiaPage API_URL={API_URL} idEquipoUsuario={idEquipoUsuario} idPartida={idPartida} />} />
             <Route path="/cuerpo-tecnico" element={<CuerpoTecnicoPage API_URL={API_URL} idEquipoUsuario={idEquipoUsuario} />} />
+            <Route path="/infraestructura" element={<InfraestructuraPage API_URL={API_URL} idEquipoUsuario={idEquipoUsuario} />} />
             <Route path="/economia" element={<EconomiaPage API_URL={API_URL} idEquipoUsuario={idEquipoUsuario} />} />
             <Route path="/directiva" element={<DirectivaPage API_URL={API_URL} idPartida={idPartida} onEstadoCambiado={onEstadoCambiado} />} />
             <Route path="/jugar" element={<JugarPage />} />

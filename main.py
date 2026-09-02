@@ -3503,6 +3503,7 @@ async def borrar_partida(id_partida: int, db: AsyncSession = Depends(get_db)):
         await db.execute(delete(PersonalTecnico).where(PersonalTecnico.id_equipo.in_(equipo_ids)))
         await db.execute(delete(ReporteScouting).where(ReporteScouting.id_equipo.in_(equipo_ids)))
         await db.execute(delete(Ojeador).where(Ojeador.id_equipo.in_(equipo_ids)))
+        await db.execute(delete(SolicitudObra).where(SolicitudObra.id_equipo.in_(equipo_ids)))
     await db.execute(delete(Jugador).where(Jugador.id_partida == id_partida))
     await db.execute(delete(Calendario).where(Calendario.id_partida == id_partida))
     await db.execute(delete(Equipo).where(Equipo.id_partida == id_partida))

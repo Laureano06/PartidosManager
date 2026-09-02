@@ -33,6 +33,7 @@ export default function Sidebar({ presupuesto, nombreClub, escudoUrl, confianzaD
     { path: '/desarrollo', label: 'Centro de Desarrollo' },
     { path: '/academia', label: 'Academia' },
     { path: '/cuerpo-tecnico', label: 'Cuerpo Técnico' },
+    { path: '/infraestructura', label: 'Infraestructura' },
     { path: '/economia', label: 'Economía' },
     { path: '/directiva', label: 'Directiva' },
     { path: '/jugar', label: 'Motor Jugable (proto)' },
