@@ -16,6 +16,28 @@ class JugadorOut(BaseModel):
     defensa: int
     pase: int
     fisico: int
+    finalizacion: int
+    regate: int
+    primer_toque: int
+    centros: int
+    cabeceo: int
+    marcaje: int
+    entradas: int
+    tiros_lejanos: int
+    agresividad: int
+    valentia: int
+    decisiones: int
+    concentracion: int
+    anticipacion: int
+    compostura: int
+    vision: int
+    liderazgo: int
+    ritmo: int
+    aceleracion: int
+    resistencia: int
+    fuerza: int
+    agilidad: int
+    porteria: int
     energia: int
     moral: int
     valor_mercado: int
