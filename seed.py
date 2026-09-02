@@ -36,7 +36,7 @@ from engine.data_gen import (
     LIGAS, CLUB_NAMES, CONFEDERACION, color_para_indice, gen_squad, gen_squad_mixto,
     gen_player_real, clasificar_plantel,
     nivel_club, factor_overall_liga, presupuesto_club, objetivo_por_nivel, reputacion_club,
-    random_name, random_nation,
+    nivel_inicial_instalacion, random_name, random_nation,
 )
 from engine.copa_engine import (
     COMPETENCIAS, OFFSET_SEMANAS_GRUPO, fecha_ronda, seleccionar_participantes,
@@ -239,6 +239,8 @@ async def crear_partida(
             codigo_club, nombre_club = fila[0], fila[1]
             escudo_url = fila[2] if len(fila) >= 3 and fila[2] else None
             presupuesto = presupuesto_club(codigo_liga, niveles[i])
+            reputacion_eq = reputacion_club(codigo_liga, niveles[i])
+            nivel_infra = nivel_inicial_instalacion(reputacion_eq)
             eq = Equipo(
                 id_partida=partida.id_partida,
                 id_liga=liga.id_liga,
@@ -253,8 +255,14 @@ async def crear_partida(
                 es_usuario=False,
                 presupuesto_fichajes=presupuesto,
                 presupuesto_salarios=round(presupuesto * 0.3 / 10_000) * 10_000,
-                reputacion=reputacion_club(codigo_liga, niveles[i]),
+                reputacion=reputacion_eq,
                 escudo_url=escudo_url,
+                nivel_centro_entrenamiento=nivel_infra,
+                nivel_centro_medico=nivel_infra,
+                nivel_analitica=nivel_infra,
+                nivel_captacion_juvenil=nivel_infra,
+                nivel_instalaciones_juveniles=nivel_infra,
+                nivel_entrenadores_juveniles=nivel_infra,
             )
             session.add(eq)
             equipos.append(eq)

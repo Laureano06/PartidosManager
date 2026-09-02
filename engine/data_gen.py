@@ -288,6 +288,16 @@ def reputacion_club(codigo_liga: str, tier: float) -> int:
     return round(piso + (techo - piso) * tier)
 
 
+def nivel_inicial_instalacion(reputacion: int) -> int:
+    """Nivel de infraestructura de ARRANQUE acorde al peso real del club —
+    un club grande (reputación alta, ej. un gigante europeo) ya tiene
+    instalaciones de primer nivel desde el vamos, no arranca en cero como
+    si recién hubiera ascendido; uno chico arranca modesto, pero nunca en
+    la nada. Anclado al mismo rango de reputación que reputacion_club
+    (60-94 en todo el juego, ver LIGA_TECHO_OVR/LIGA_PISO_OVR)."""
+    return max(1, min(20, round((reputacion - 60) / 34 * 19) + 1))
+
+
 _PALETA_COLORES = [
     "#173C2E", "#A6402F", "#3A6EA5", "#6B4E9E", "#B0701C", "#2B6E52", "#7A2F4F", "#1E5A6B",
     "#8C1F28", "#264653", "#2A9D8F", "#E76F51", "#4A4E69", "#606C38", "#9B2226", "#023047",
