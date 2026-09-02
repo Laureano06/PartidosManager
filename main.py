@@ -695,9 +695,7 @@ async def _procesar_solicitudes_participacion(db: AsyncSession, fecha: date, id_
             continue
 
         # FASE 2: DIRECTIVA_CONTRAPARTE
-        presupuesto_referencia_liga = float((await db.execute(
-            select(func.avg(Equipo.presupuesto_fichajes)).where(Equipo.id_liga == contraparte.id_liga)
-        )).scalar() or contraparte.presupuesto_fichajes)
+        presupuesto_referencia_liga = await _presupuesto_referencia_liga(db, contraparte)
         afiliacion_actual = (await db.execute(
             select(AfiliacionClub).where(
                 AfiliacionClub.id_partida == id_partida,
@@ -2975,6 +2973,12 @@ async def obtener_economia(id_equipo: int, db: AsyncSession = Depends(get_db)):
 
 
 # ---------- MULTICLUB ----------
+async def _presupuesto_referencia_liga(db: AsyncSession, equipo: Equipo) -> float:
+    return float((await db.execute(
+        select(func.avg(Equipo.presupuesto_fichajes)).where(Equipo.id_liga == equipo.id_liga)
+    )).scalar() or equipo.presupuesto_fichajes)
+
+
 async def _valor_club_equipo(db: AsyncSession, equipo: Equipo) -> int:
     valor_plantel = (await db.execute(
         select(func.coalesce(func.sum(Jugador.valor_mercado), 0)).where(
@@ -3109,9 +3113,21 @@ async def cotizar_participacion(id_equipo_iniciador: int, id_equipo_contraparte:
         if porcentaje > porcentaje_actual:
             raise HTTPException(status_code=400, detail="No podés vender más de lo que tenés")
         monto = multiclub_engine.ingreso_venta(valor, porcentaje_actual, porcentaje_actual - porcentaje)
+        tipo_relevante = multiclub_engine.tipo_relacion_por_porcentaje(porcentaje_actual) or "MINORITARIO"
     else:
+        if porcentaje_actual + porcentaje > 100:
+            raise HTTPException(status_code=400, detail=f"No podés superar el 100% (ya tenés {porcentaje_actual}%)")
         monto = multiclub_engine.costo_participacion(valor, porcentaje_actual, porcentaje_actual + porcentaje)
-    return {"valor_club": valor, "porcentaje_actual": porcentaje_actual, "monto": monto}
+        tipo_relevante = multiclub_engine.tipo_relacion_por_porcentaje(porcentaje_actual + porcentaje) or "MINORITARIO"
+
+    presupuesto_referencia_liga = await _presupuesto_referencia_liga(db, contraparte)
+    interes = multiclub_engine.interes_directiva_contraparte(
+        contraparte.reputacion, contraparte.presupuesto_fichajes, presupuesto_referencia_liga, tipo_relevante, operacion,
+    )
+    return {
+        "valor_club": valor, "porcentaje_actual": porcentaje_actual, "monto": monto,
+        "tipo_relacion_resultante": tipo_relevante, "interes_directiva_contraparte": interes,
+    }
 
 
 @app.post("/multiclub/ofertar", tags=["Multiclub"])
@@ -3149,6 +3165,8 @@ async def ofertar_participacion(datos: OfertaParticipacionIn, db: AsyncSession =
             raise HTTPException(status_code=400, detail="No podés vender más de lo que tenés")
         monto = multiclub_engine.ingreso_venta(valor, porcentaje_actual, porcentaje_actual - datos.porcentaje)
     else:
+        if porcentaje_actual + datos.porcentaje > 100:
+            raise HTTPException(status_code=400, detail=f"No podés superar el 100% (ya tenés {porcentaje_actual}%)")
         monto = multiclub_engine.costo_participacion(valor, porcentaje_actual, porcentaje_actual + datos.porcentaje)
 
     fecha = await _fecha_actual(db, iniciador.id_partida)

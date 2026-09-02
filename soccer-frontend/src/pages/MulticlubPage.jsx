@@ -3,6 +3,46 @@ import React, { useCallback, useEffect, useState } from 'react';
 const NOMBRE_TIPO = { PROPIETARIO: 'Propietario', SATELITE: 'Club Satélite', MINORITARIO: 'Inversión Minoritaria', MARCA: 'Red de Marca' };
 const NOMBRE_ROL = { PARTICIPADO: 'te controla', INVERSOR: 'controlás vos', MARCA: 'comparten identidad' };
 
+const MODELOS = [
+  { tipo: 'MINORITARIO', rango: '1-14%', ejemplo: 'Brighton en Alavés', desc: 'Solo inversión: cobrás si al club le va bien y accedés a algo de su scouting, pero no tenés control deportivo.' },
+  { tipo: 'SATELITE', rango: '15-34%', ejemplo: 'Chelsea–Strasbourg, Udinese', desc: 'Peso real sin control total: pipeline de jugadores más fluido y bono más fuerte, pero el club sigue siendo independiente.' },
+  { tipo: 'PROPIETARIO', rango: '35-100%', ejemplo: 'City Football Group', desc: 'Control total: el club pasa a ser parte de tu grupo, comparte scouting y metodología a fondo.' },
+  { tipo: 'MARCA', rango: 'fijo, no comprable', ejemplo: 'Red Bull (Leipzig/Bragantino)', desc: 'Identidad y filosofía compartida entre clubes, sin relación de accionista — se define al crear la carrera, no se compra ni se vende.' },
+];
+
+const NOMBRE_INTERES = {
+  MUY_INTERESADOS: { texto: 'Muy interesados', color: 'text-emerald-400' },
+  INTERESADOS: { texto: 'Interesados', color: 'text-sky-400' },
+  RETICENTES: { texto: 'Reticentes', color: 'text-amber-400' },
+  MUY_RETICENTES: { texto: 'Muy reticentes', color: 'text-rose-400' },
+};
+
+function PanelModelos() {
+  const [abierto, setAbierto] = useState(false);
+  return (
+    <div className="bg-[#121e36] border border-slate-800 rounded-2xl p-6">
+      <button onClick={() => setAbierto((v) => !v)} className="w-full flex items-center justify-between text-left">
+        <h2 className="text-xs font-bold text-sky-400 uppercase tracking-wider">¿Qué son los modelos multiclub?</h2>
+        <span className="text-slate-500 text-xs">{abierto ? 'Ocultar ▲' : 'Ver ▼'}</span>
+      </button>
+      {abierto && (
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-4">
+          {MODELOS.map((m) => (
+            <div key={m.tipo} className="bg-[#0b1326] border border-slate-800 rounded-xl p-3 text-xs space-y-1">
+              <div className="flex justify-between items-baseline">
+                <span className="text-white font-bold">{NOMBRE_TIPO[m.tipo]}</span>
+                <span className="text-slate-500">{m.rango}</span>
+              </div>
+              <p className="text-slate-400">{m.desc}</p>
+              <p className="text-slate-600 italic">Ej: {m.ejemplo}</p>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function TarjetaPosicion({ multiclub }) {
   const { posicion, red_marca: redMarca, socio_marca: socioMarca, bono } = multiclub;
 
@@ -84,7 +124,7 @@ function FormularioOperacion({ idEquipo, contraparte, operacion, onCerrar, onCon
         <div>
           <label className="text-xs text-slate-400 block mb-1">Puntos porcentuales</label>
           <input
-            type="number" min={1} max={operacion === 'VENDER' ? tuPorcentaje : 100} value={porcentaje}
+            type="number" min={1} max={operacion === 'VENDER' ? tuPorcentaje : 100 - (cotizacion?.porcentaje_actual ?? tuPorcentaje)} value={porcentaje}
             onChange={(e) => setPorcentaje(Number(e.target.value))}
             className="w-full bg-[#0b1326] border border-slate-700 p-2.5 rounded-lg text-white text-sm"
           />
@@ -95,8 +135,15 @@ function FormularioOperacion({ idEquipo, contraparte, operacion, onCerrar, onCon
             <>
               <p className="text-slate-400">Valor estimado del club: <span className="text-slate-200 font-bold">${cotizacion.valor_club.toLocaleString('es-AR')}</span></p>
               <p className="text-slate-400">Tu participación actual: <span className="text-slate-200 font-bold">{cotizacion.porcentaje_actual}%</span></p>
+              <p className="text-slate-400">Quedarías con: <span className="text-slate-200 font-bold">{NOMBRE_TIPO[cotizacion.tipo_relacion_resultante] || cotizacion.tipo_relacion_resultante}</span></p>
               <p className="text-slate-400">
                 {operacion === 'COMPRAR' ? 'Costo' : 'Ingreso'}: <span className="text-sky-400 font-bold">${cotizacion.monto.toLocaleString('es-AR')}</span>
+              </p>
+              <p className="text-slate-400 pt-1 border-t border-slate-800">
+                Directiva de {contraparte.nombre}:{' '}
+                <span className={`font-bold ${NOMBRE_INTERES[cotizacion.interes_directiva_contraparte]?.color || 'text-slate-300'}`}>
+                  {NOMBRE_INTERES[cotizacion.interes_directiva_contraparte]?.texto || cotizacion.interes_directiva_contraparte}
+                </span>
               </p>
             </>
           )}
@@ -149,6 +196,7 @@ export default function MulticlubPage({ API_URL, idEquipoUsuario }) {
   return (
     <div className="space-y-6">
       <TarjetaPosicion multiclub={multiclub} />
+      <PanelModelos />
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <div className="bg-[#121e36] border border-slate-800 rounded-2xl p-6">

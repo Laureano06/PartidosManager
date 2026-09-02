@@ -120,16 +120,17 @@ def evaluar_directiva_propia(confianza_directiva: int, monto: int, presupuesto_d
     return {"estado": "APROBADA", "motivo": "La directiva autorizó la operación."}
 
 
-def evaluar_directiva_contraparte(
+def _prob_aceptacion_contraparte(
     reputacion: int, presupuesto_fichajes: int, presupuesto_referencia_liga: int,
     tipo_relacion: str, operacion: str,
-) -> dict:
-    """La directiva del club CONTRAPARTE (IA) evalúa si acepta ceder o
-    recomprar la participación. Como los clubes de la IA no tienen una
-    'confianza' propia hacia terceros (ese campo es de Partida, la relación
-    del usuario con SU club), la señal sale de orgullo (reputación — un
-    club grande resiste más ceder control) y necesidad de caja (presupuesto
-    bajo relativo al promedio de su liga = más dispuesto a vender/aceptar)."""
+) -> float:
+    """Probabilidad de que la directiva del club CONTRAPARTE (IA) acepte
+    ceder o recomprar la participación. Como los clubes de la IA no tienen
+    una 'confianza' propia hacia terceros (ese campo es de Partida, la
+    relación del usuario con SU club), la señal sale de orgullo (reputación
+    — un club grande resiste más ceder control) y necesidad de caja
+    (presupuesto bajo relativo al promedio de su liga = más dispuesto a
+    vender/aceptar)."""
     orgullo = reputacion / 100
     if operacion == "COMPRAR":
         necesidad = max(0.0, min(1.5, 1 - presupuesto_fichajes / max(1, presupuesto_referencia_liga)))
@@ -138,7 +139,18 @@ def evaluar_directiva_contraparte(
     else:  # VENDER: la contraparte recompra tu stake con su propio presupuesto
         capacidad = max(0.0, min(1.0, presupuesto_fichajes / max(1, presupuesto_referencia_liga)))
         prob = 0.20 + capacidad * 0.5 + orgullo * 0.3
-    prob = max(PROB_MIN_PARTICIPACION, min(PROB_MAX_PARTICIPACION, prob))
+    return max(PROB_MIN_PARTICIPACION, min(PROB_MAX_PARTICIPACION, prob))
+
+
+def evaluar_directiva_contraparte(
+    reputacion: int, presupuesto_fichajes: int, presupuesto_referencia_liga: int,
+    tipo_relacion: str, operacion: str,
+) -> dict:
+    """Tira el dado con la probabilidad de _prob_aceptacion_contraparte y
+    devuelve el veredicto final (se llama SOLO al resolver la solicitud,
+    nunca antes — ver interes_directiva_contraparte para una lectura previa
+    sin comprometer el resultado)."""
+    prob = _prob_aceptacion_contraparte(reputacion, presupuesto_fichajes, presupuesto_referencia_liga, tipo_relacion, operacion)
     if random.random() >= prob:
         motivo = (
             "El club objetivo rechaza ceder esa participación por ahora." if operacion == "COMPRAR" else
@@ -146,6 +158,29 @@ def evaluar_directiva_contraparte(
         )
         return {"estado": "RECHAZADA", "motivo": motivo}
     return {"estado": "ACEPTADA", "motivo": "El club objetivo aceptó la operación."}
+
+
+_UMBRALES_INTERES = [
+    (0.75, "MUY_INTERESADOS"),
+    (0.55, "INTERESADOS"),
+    (0.35, "RETICENTES"),
+    (0.0, "MUY_RETICENTES"),
+]
+
+
+def interes_directiva_contraparte(
+    reputacion: int, presupuesto_fichajes: int, presupuesto_referencia_liga: int,
+    tipo_relacion: str, operacion: str,
+) -> str:
+    """Lectura PREVIA (antes de ofertar) de qué tan dispuesta está la
+    directiva del club objetivo — una categoría, no el número exacto de
+    probabilidad, para no romper la incertidumbre del juego (el resultado
+    real se sigue jugando en evaluar_directiva_contraparte al resolver)."""
+    prob = _prob_aceptacion_contraparte(reputacion, presupuesto_fichajes, presupuesto_referencia_liga, tipo_relacion, operacion)
+    for umbral, etiqueta in _UMBRALES_INTERES:
+        if prob >= umbral:
+            return etiqueta
+    return "MUY_RETICENTES"
 
 
 def dias_espera_directiva_propia(confianza_directiva: int, monto: int, presupuesto_disponible: int) -> int:
