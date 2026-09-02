@@ -232,53 +232,54 @@ export default function PlayerDetailModal({ jugador, open, onClose, API_URL, onN
           </div>
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-[auto,1fr] gap-6">
-          <div className="flex flex-row items-start gap-4 lg:w-72">
-            <MiniPitchPosicion posicion={datos.posicion} posicionEspecifica={datos.posicion_especifica} />
-            <div className="flex-1 text-xs space-y-0 min-w-0">
+        <div className="grid grid-cols-[140px_1fr] gap-4 sm:gap-6 items-start">
+          <MiniPitchPosicion posicion={datos.posicion} posicionEspecifica={datos.posicion_especifica} />
+
+          <div className="space-y-4">
+            <div className="grid grid-cols-2 sm:grid-cols-5 gap-x-4 gap-y-1 text-xs bg-[#0b1326] border border-slate-800 rounded-2xl p-4">
               <Stat label="Edad" value={datos.edad} />
               <Stat label="Energía" value={datos.energia != null ? `${datos.energia}%` : null} />
               <Stat label="Moral" value={datos.moral != null ? `${datos.moral}%` : null} />
               <Stat label="Valor" value={`$${(datos.val ?? datos.valor_mercado ?? 0).toLocaleString('es-AR')}`} />
               <Stat label="Salario/sem" value={`$${(datos.sal ?? datos.salario ?? 0).toLocaleString('es-AR')}`} />
             </div>
-          </div>
 
-          {desgloseDisponible ? (
-            <div className="space-y-4">
-              <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
-                <ListaAtributos titulo="Técnico" items={ATRIBUTOS_TECNICO} jugador={datos} />
-                <ListaAtributos titulo="Mental" items={ATRIBUTOS_MENTAL} jugador={datos} />
-                <ListaAtributos titulo="Físico" items={ATRIBUTOS_FISICO} jugador={datos} />
-                {datos.posicion === 'POR' && (
-                  <ListaAtributos titulo="Portería" items={[['porteria', 'Portería']]} jugador={datos} />
+            {desgloseDisponible ? (
+              <div className="space-y-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+                  <ListaAtributos titulo="Técnico" items={ATRIBUTOS_TECNICO} jugador={datos} />
+                  <ListaAtributos titulo="Mental" items={ATRIBUTOS_MENTAL} jugador={datos} />
+                  <ListaAtributos titulo="Físico" items={ATRIBUTOS_FISICO} jugador={datos} />
+                  {datos.posicion === 'POR' && (
+                    <ListaAtributos titulo="Portería" items={[['porteria', 'Portería']]} jugador={datos} />
+                  )}
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="bg-[#0b1326] border border-slate-800 rounded-2xl p-4">
+                    <h4 className="text-xs font-bold text-sky-400 uppercase tracking-wider mb-2 text-center">Perfil</h4>
+                    <RadarChart ejes={ejesRadar} />
+                  </div>
+                  <RolesEfectivos jugador={datos} />
+                </div>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-10 gap-y-1 text-sm content-start">
+                <Stat
+                  label="Posición"
+                  value={datos.posicion_especifica ? `${datos.posicion_especifica} (${datos.pos || datos.posicion})` : (datos.pos || datos.posicion)}
+                />
+                <Stat label="Ataque" value={datos.atq ?? datos.ataque} />
+                <Stat label="Defensa" value={datos.def ?? datos.defensa} />
+                <Stat label="Pase" value={datos.pase} />
+                <Stat label="Físico" value={datos.fis ?? datos.fisico} />
+                {datos.scouting_progreso != null && (
+                  <p className="col-span-full text-xs text-slate-500 pt-2">
+                    Desglose de atributos disponible al llegar a 100% de scouting (hoy {datos.scouting_progreso}%).
+                  </p>
                 )}
               </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div className="bg-[#0b1326] border border-slate-800 rounded-2xl p-4">
-                  <h4 className="text-xs font-bold text-sky-400 uppercase tracking-wider mb-2 text-center">Perfil</h4>
-                  <RadarChart ejes={ejesRadar} />
-                </div>
-                <RolesEfectivos jugador={datos} />
-              </div>
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-10 gap-y-1 text-sm content-start">
-              <Stat
-                label="Posición"
-                value={datos.posicion_especifica ? `${datos.posicion_especifica} (${datos.pos || datos.posicion})` : (datos.pos || datos.posicion)}
-              />
-              <Stat label="Ataque" value={datos.atq ?? datos.ataque} />
-              <Stat label="Defensa" value={datos.def ?? datos.defensa} />
-              <Stat label="Pase" value={datos.pase} />
-              <Stat label="Físico" value={datos.fis ?? datos.fisico} />
-              {datos.scouting_progreso != null && (
-                <p className="col-span-full text-xs text-slate-500 pt-2">
-                  Desglose de atributos disponible al llegar a 100% de scouting (hoy {datos.scouting_progreso}%).
-                </p>
-              )}
-            </div>
-          )}
+            )}
+          </div>
         </div>
 
         {historial.length > 0 && (
