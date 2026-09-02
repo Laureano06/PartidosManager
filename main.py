@@ -3069,8 +3069,13 @@ async def mercado_multiclub(id_equipo: int, db: AsyncSession = Depends(get_db)):
     if not equipo:
         raise HTTPException(status_code=404, detail="Equipo no encontrado")
 
+    # Clubes de tu MISMA liga quedan afuera del mercado: en la realidad las
+    # reglas de multipropiedad prohíben tener participación en dos clubes
+    # que compiten en la misma competición (conflicto de interés deportivo).
     otros = (await db.execute(
-        select(Equipo).where(Equipo.id_partida == equipo.id_partida, Equipo.id_equipo != id_equipo)
+        select(Equipo).where(
+            Equipo.id_partida == equipo.id_partida, Equipo.id_equipo != id_equipo, Equipo.id_liga != equipo.id_liga,
+        )
     )).scalars().all()
     tenencias = {a.id_equipo_participado: a for a in (await db.execute(
         select(AfiliacionClub).where(AfiliacionClub.id_partida == equipo.id_partida, AfiliacionClub.id_equipo_inversor == id_equipo)
@@ -3100,6 +3105,10 @@ async def cotizar_participacion(id_equipo_iniciador: int, id_equipo_contraparte:
     contraparte = await db.get(Equipo, id_equipo_contraparte)
     if not contraparte:
         raise HTTPException(status_code=404, detail="Club objetivo no encontrado")
+    if operacion == "COMPRAR":
+        iniciador = await db.get(Equipo, id_equipo_iniciador)
+        if iniciador and iniciador.id_liga == contraparte.id_liga:
+            raise HTTPException(status_code=400, detail="No podés comprar participación en un club de tu misma liga (conflicto de interés deportivo).")
     valor = await _valor_club_equipo(db, contraparte)
     afiliacion = (await db.execute(
         select(AfiliacionClub).where(
@@ -3140,6 +3149,8 @@ async def ofertar_participacion(datos: OfertaParticipacionIn, db: AsyncSession =
     contraparte = await db.get(Equipo, datos.id_equipo_contraparte)
     if not iniciador or not contraparte:
         raise HTTPException(status_code=404, detail="Equipo no encontrado")
+    if datos.operacion == "COMPRAR" and iniciador.id_liga == contraparte.id_liga:
+        raise HTTPException(status_code=400, detail="No podés comprar participación en un club de tu misma liga (conflicto de interés deportivo).")
 
     ya_pendiente = (await db.execute(
         select(SolicitudParticipacion).where(
