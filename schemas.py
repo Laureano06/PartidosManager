@@ -88,6 +88,11 @@ class EntrenamientoIn(BaseModel):
     intensidad: str
 
 
+class SolicitarObraIn(BaseModel):
+    id_equipo: int
+    tipo_instalacion: str
+
+
 class OfertaIn(BaseModel):
     id_jugador: int
     id_equipo_comprador: int

@@ -14,7 +14,7 @@ from database import engine, Base, get_db
 from models import (
     Equipo, Jugador, Tactica, PlanEntrenamiento, Calendario, OfertaFichaje, Liga, Partida, Mensaje,
     HistorialTemporada, PaqueteClubes, EventoPartido, PersonalTecnico, Ojeador, ReporteScouting,
-    CicloTemporada, OfertaClubDT,
+    CicloTemporada, OfertaClubDT, SolicitudObra,
 )
 from schemas import (
     EquipoOut, JugadorOut, LigaOut, TacticaIn, EntrenamientoIn,
@@ -22,6 +22,7 @@ from schemas import (
     RenovarContratoIn, PrecontratoIn, FicharLibreIn, NegociarContratoTraspasoIn,
     TransferibleIn, OfrecerJugadorIn, CederJugadorIn,
     CategoriaJugadorIn, IntakeDecidirIn, ReclutarJuvenilIn, ElegirDestinoDTIn,
+    SolicitarObraIn,
 )
 from engine.match_engine import simulate_match
 from engine.transfer_engine import evaluar_oferta
@@ -41,11 +42,25 @@ from engine.academia_engine import (
     generar_academia_completa, calcular_n_candidatos_intake,
 )
 from engine import directiva_engine
-from engine.data_gen import objetivo_por_nivel, nivel_desde_reputacion, tope_salarial
+from engine.data_gen import (
+    objetivo_por_nivel, nivel_desde_reputacion, tope_salarial,
+    COSTO_BASE_INSTALACION, costo_mejora_instalacion, mantenimiento_mensual_instalacion,
+)
 
 DIAS_ELEGIBLE_PRECONTRATO = 180
 DIAS_CHECKPOINT_RENOVACION_IA = 150
 PROB_RENOVACION_IA = 0.75
+
+# Tipos de instalación válidos (clave usada en SolicitudObra.tipo_instalacion
+# y en la columna nivel_<tipo> de Equipo) con su nombre para mostrar.
+NOMBRE_INSTALACION = {
+    "centro_entrenamiento": "Centro de Entrenamiento",
+    "centro_medico": "Centro Médico",
+    "analitica": "Departamento de Analítica",
+    "captacion_juvenil": "Captación Juvenil",
+    "instalaciones_juveniles": "Instalaciones Juveniles",
+    "entrenadores_juveniles": "Entrenadores Juveniles",
+}
 
 
 @asynccontextmanager
@@ -81,6 +96,26 @@ async def _fecha_actual(db: AsyncSession, id_partida: int) -> date:
 
 
 # ---------- ACADEMIA (plantel juvenil) ----------
+def _bono_instalaciones_juveniles(equipo: Equipo) -> float:
+    """Bono combinado de Instalaciones Juveniles + Entrenadores Juveniles
+    (0.0-0.3) para academia_engine.calcular_factor_desde_plantel."""
+    return min(0.3, (equipo.nivel_instalaciones_juveniles + equipo.nivel_entrenadores_juveniles) * 0.0075)
+
+
+def _bono_captacion_juvenil(equipo: Equipo) -> int:
+    """Candidatos extra (0-5) en el intake anual según Captación Juvenil."""
+    return equipo.nivel_captacion_juvenil // 4
+
+
+def _factor_medico(equipo: Equipo | None) -> float:
+    """Multiplicador de riesgo de lesión según el Centro Médico del club
+    (1.0 = sin efecto, hasta 0.4 = 60% menos riesgo en nivel 20) — ver
+    engine/injury_engine.py::evaluar_lesion."""
+    if not equipo:
+        return 1.0
+    return max(0.4, 1 - equipo.nivel_centro_medico * 0.03)
+
+
 async def _asegurar_academia(db: AsyncSession, equipo: Equipo) -> None:
     """Genera la Academia completa (60 jugadores, 15 por categoría) la
     primera vez que se mira este club — nada se genera en seed.py, así los
@@ -97,7 +132,8 @@ async def _asegurar_academia(db: AsyncSession, equipo: Equipo) -> None:
     plantel_primera = (await db.execute(
         select(Jugador).where(Jugador.id_equipo == equipo.id_equipo, Jugador.categoria == "PRIMERA")
     )).scalars().all()
-    factor = academia_engine.calcular_factor_desde_plantel(plantel_primera)
+    bono_instalaciones = _bono_instalaciones_juveniles(equipo)
+    factor = academia_engine.calcular_factor_desde_plantel(plantel_primera, bono_instalaciones)
     fecha = await _fecha_actual(db, equipo.id_partida)
     for datos in generar_academia_completa(pais, factor):
         _completar_contrato_juvenil(datos, fecha)
@@ -497,6 +533,71 @@ async def _procesar_cesiones(db: AsyncSession, fecha: date, id_partida: int) -> 
                 )
 
 
+async def _procesar_solicitudes_obra(db: AsyncSession, fecha: date, id_partida: int) -> None:
+    """Se corre en cada avance de día: resuelve las solicitudes de obra de
+    infraestructura PENDIENTE cuya fecha_resolucion ya llegó — el veredicto
+    (aprobada/rechazada) se decide RECIÉN ACÁ, con la confianza/presupuesto
+    del día de la resolución, no del día que se pidió. Si se aprueba, cobra
+    el costo y sube el nivel de la instalación; en cualquier caso, avisa
+    por mensaje."""
+    pendientes = (await db.execute(
+        select(SolicitudObra).where(
+            SolicitudObra.id_partida == id_partida,
+            SolicitudObra.estado == "PENDIENTE",
+            SolicitudObra.fecha_resolucion <= fecha,
+        )
+    )).scalars().all()
+    if not pendientes:
+        return
+    ids_equipo = {s.id_equipo for s in pendientes}
+    equipos_por_id: dict[int, Equipo] = {e.id_equipo: e for e in (
+        await db.execute(select(Equipo).where(Equipo.id_equipo.in_(ids_equipo)))
+    ).scalars().all()}
+    partida = await db.get(Partida, id_partida)
+    confianza = partida.confianza_directiva if partida else directiva_engine.CONFIANZA_INICIAL
+
+    for s in pendientes:
+        equipo = equipos_por_id.get(s.id_equipo)
+        if not equipo:
+            continue
+        nombre_instalacion = NOMBRE_INSTALACION.get(s.tipo_instalacion, s.tipo_instalacion)
+        veredicto = directiva_engine.evaluar_solicitud_obra(confianza, s.costo, equipo.presupuesto_fichajes)
+        s.estado = veredicto["estado"]
+        if veredicto["estado"] == "APROBADA":
+            setattr(equipo, f"nivel_{s.tipo_instalacion}", s.nivel_objetivo)
+            equipo.presupuesto_fichajes -= s.costo
+            equipo.presupuesto_salarios = tope_salarial(equipo.presupuesto_fichajes)
+            if equipo.es_usuario:
+                await _crear_mensaje(
+                    db, equipo.id_equipo, "Directiva del Club", f"Obra aprobada: {nombre_instalacion}",
+                    f"La directiva aprobó la mejora de {nombre_instalacion} a nivel {s.nivel_objetivo} "
+                    f"por ${money(s.costo)}. Ya está operativa.",
+                    "SISTEMA", fecha,
+                )
+        else:
+            if equipo.es_usuario:
+                await _crear_mensaje(
+                    db, equipo.id_equipo, "Directiva del Club", f"Obra rechazada: {nombre_instalacion}",
+                    f"La directiva rechazó la mejora de {nombre_instalacion}. {veredicto['motivo']}",
+                    "SISTEMA", fecha,
+                )
+
+
+async def _procesar_mantenimiento_infraestructura(db: AsyncSession, id_partida: int) -> None:
+    """Se corre en cada avance de día: cobra a cada club el mantenimiento
+    mensual de sus instalaciones, PRORRATEADO POR DÍA (no hay ciclo mensual
+    en el juego, ver mantenimiento_mensual_instalacion en data_gen.py)."""
+    equipos = (await db.execute(select(Equipo).where(Equipo.id_partida == id_partida))).scalars().all()
+    for equipo in equipos:
+        total_mensual = sum(
+            mantenimiento_mensual_instalacion(tipo, getattr(equipo, f"nivel_{tipo}"))
+            for tipo in COSTO_BASE_INSTALACION
+        )
+        if total_mensual:
+            equipo.presupuesto_fichajes -= round(total_mensual / 30)
+            equipo.presupuesto_salarios = tope_salarial(equipo.presupuesto_fichajes)
+
+
 async def _procesar_progreso_scouting(db: AsyncSession, fecha: date, id_partida: int) -> None:
     """Se corre en cada avance de día: todo ojeador con un objetivo asignado
     suma progreso a su reporte, más rápido cuanto mejor sea su `calidad`."""
@@ -505,6 +606,10 @@ async def _procesar_progreso_scouting(db: AsyncSession, fecha: date, id_partida:
     )).scalars().all()
     if not ojeadores:
         return
+    ids_equipo_ojeadores = {o.id_equipo for o in ojeadores}
+    equipos_ojeadores_por_id: dict[int, Equipo] = {e.id_equipo: e for e in (
+        await db.execute(select(Equipo).where(Equipo.id_equipo.in_(ids_equipo_ojeadores)))
+    ).scalars().all()}
     claves = {(o.id_equipo, o.id_jugador_asignado) for o in ojeadores}
     existentes = (await db.execute(
         select(ReporteScouting).where(
@@ -523,7 +628,11 @@ async def _procesar_progreso_scouting(db: AsyncSession, fecha: date, id_partida:
             reporte = ReporteScouting(id_equipo=o.id_equipo, id_jugador=o.id_jugador_asignado, id_partida=id_partida, progreso=0)
             db.add(reporte)
             reportes[clave] = reporte
-        reporte.progreso = min(100, reporte.progreso + max(1, o.calidad // 15))
+        equipo_ojeador = equipos_ojeadores_por_id.get(o.id_equipo)
+        # Bono del Departamento de Analítica del club: acelera el progreso
+        # de cualquier reporte en curso, sin importar quién sea el ojeador.
+        bono_analitica = round((equipo_ojeador.nivel_analitica if equipo_ojeador else 0) * 0.4)
+        reporte.progreso = min(100, reporte.progreso + max(1, o.calidad // 15) + bono_analitica)
         reporte.fecha_ultimo_reporte = fecha
 
 
@@ -624,10 +733,13 @@ async def _procesar_fin_temporada_confederacion(db: AsyncSession, fecha: date, i
             continue
         liga_club = next((l for l in ligas if l.id_liga == equipo_academia.id_liga), None)
         pais_club = liga_club.pais if liga_club else "Argentina"
-        factor_club = academia_engine.calcular_factor_desde_plantel(jugadores_primera_por_club.get(equipo_academia.id_equipo, []))
+        factor_club = academia_engine.calcular_factor_desde_plantel(
+            jugadores_primera_por_club.get(equipo_academia.id_equipo, []), _bono_instalaciones_juveniles(equipo_academia),
+        )
+        bono_captacion = _bono_captacion_juvenil(equipo_academia)
         for categoria_intake in ("SUB13", "SUB15", "SUB18"):
             cantidad_actual = sum(1 for j in academia_club if j.categoria == categoria_intake)
-            n_candidatos = calcular_n_candidatos_intake(cantidad_actual)
+            n_candidatos = calcular_n_candidatos_intake(cantidad_actual, bono_captacion)
             faltaban = cantidad_actual < academia_engine.TAMANIO_MINIMO_CATEGORIA
             for _ in range(n_candidatos):
                 pos = random.choice(["POR", "DEF", "MED", "DEL"])
@@ -888,8 +1000,11 @@ async def _procesar_partidos_ajenos_del_dia(db: AsyncSession, fecha: date, id_pa
                         "ataque": p.ataque, "defensa": p.defensa, "energia": p.energia, "duty": p.duty} for p in jv]
         tac_local_dict = {"formacion": tac_local.formacion, "mentalidad": tac_local.mentalidad, "presion": tac_local.presion}
         tac_visit_dict = {"formacion": tac_visit.formacion, "mentalidad": tac_visit.mentalidad, "presion": tac_visit.presion}
-        resultado = simulate_match(dict_local, dict_visit, tac_local_dict, tac_visit_dict, ia_local=True, ia_visit=True)
-        _aplicar_efectos_fisicos(jl, jv, plantel_local, plantel_visit, resultado)
+        resultado = simulate_match(
+            dict_local, dict_visit, tac_local_dict, tac_visit_dict, ia_local=True, ia_visit=True,
+            factor_medico_local=_factor_medico(local), factor_medico_visit=_factor_medico(visit),
+        )
+        _aplicar_efectos_fisicos(jl, jv, plantel_local, plantel_visit, resultado, _factor_medico(local), _factor_medico(visit))
         f.jugado = True
         f.goles_local = resultado["gh"]
         f.goles_visitante = resultado["gv"]
@@ -959,6 +1074,8 @@ async def avanzar_dia(id_partida: int, db: AsyncSession = Depends(get_db)):
     await _procesar_contratos(db, estado.fecha_actual, id_partida)
     await _procesar_cesiones(db, estado.fecha_actual, id_partida)
     await _procesar_progreso_scouting(db, estado.fecha_actual, id_partida)
+    await _procesar_solicitudes_obra(db, estado.fecha_actual, id_partida)
+    await _procesar_mantenimiento_infraestructura(db, id_partida)
     await _procesar_arranques_diferidos(db, estado.fecha_actual, id_partida)
     await _procesar_partidos_ajenos_del_dia(db, estado.fecha_actual, id_partida, equipo_usuario)
     await db.commit()
@@ -1017,6 +1134,8 @@ async def simular_hasta(id_partida: int, datos: dict, db: AsyncSession = Depends
         await _procesar_contratos(db, estado.fecha_actual, id_partida)
         await _procesar_cesiones(db, estado.fecha_actual, id_partida)
         await _procesar_progreso_scouting(db, estado.fecha_actual, id_partida)
+        await _procesar_solicitudes_obra(db, estado.fecha_actual, id_partida)
+        await _procesar_mantenimiento_infraestructura(db, id_partida)
         await _procesar_arranques_diferidos(db, estado.fecha_actual, id_partida)
         await _procesar_partidos_ajenos_del_dia(db, estado.fecha_actual, id_partida, equipo_usuario)
     else:
@@ -1421,7 +1540,10 @@ async def _preparar_lineup(db: AsyncSession, fixture: Calendario):
     return local, visit, plantel_local, plantel_visit, jl, jv, dict_local, dict_visit, tac_local_dict, tac_visit_dict
 
 
-def _calcular_efectos_fisicos(plantel_local: list[Jugador], plantel_visit: list[Jugador], resultado: dict) -> list[dict]:
+def _calcular_efectos_fisicos(
+    plantel_local: list[Jugador], plantel_visit: list[Jugador], resultado: dict,
+    factor_medico_local: float = 1.0, factor_medico_visit: float = 1.0,
+) -> list[dict]:
     """Calcula desgaste + lesiones nuevas + recuperación de lesiones previas
     + ajuste de moral para los planteles de ambos equipos, SIN tocar los
     objetos ORM — devuelve una lista de dicts listos para un UPDATE masivo
@@ -1452,7 +1574,11 @@ def _calcular_efectos_fisicos(plantel_local: list[Jugador], plantel_visit: list[
             les = lesionados_ahora[j.id_jugador]
             nuevo_lesionado, nuevo_tipo, nuevas_semanas = True, les["tipo"], les["semanas"]
         elif j.lesionado:
-            nuevas_semanas = j.semanas_lesion - 1
+            # El Centro Médico acelera la recuperación: hasta ~3x más rápido
+            # en nivel 20 (factor_medico llega a 0.4, ver _factor_medico).
+            factor_medico = factor_medico_local if j.id_jugador in ids_local else factor_medico_visit
+            paso_recuperacion = max(1, round(1 + (1 - factor_medico) * 3))
+            nuevas_semanas = j.semanas_lesion - paso_recuperacion
             if nuevas_semanas <= 0:
                 nuevo_lesionado, nuevo_tipo, nuevas_semanas = False, None, 0
         jugo = j.id_jugador in energia_gastada
@@ -1485,12 +1611,14 @@ def _calcular_update_equipo(equipo: Equipo, goles_favor: int, goles_contra: int)
     }
 
 
-def _aplicar_efectos_fisicos(jl, jv, plantel_local, plantel_visit, resultado) -> None:
+def _aplicar_efectos_fisicos(
+    jl, jv, plantel_local, plantel_visit, resultado, factor_medico_local: float = 1.0, factor_medico_visit: float = 1.0,
+) -> None:
     """Igual que _calcular_efectos_fisicos pero mutando los objetos ORM
     directamente — se usa para UN solo partido (el del usuario, o el modo
     "jugar en vivo"), donde la cantidad de filas es chica y no vale la pena
     la complejidad del camino de UPDATE masivo."""
-    updates = _calcular_efectos_fisicos(plantel_local, plantel_visit, resultado)
+    updates = _calcular_efectos_fisicos(plantel_local, plantel_visit, resultado, factor_medico_local, factor_medico_visit)
     updates_por_id = {u["id_jugador"]: u for u in updates}
     for j in plantel_local + plantel_visit:
         u = updates_por_id[j.id_jugador]
@@ -1559,9 +1687,10 @@ async def _simular_y_finalizar(
         dict_local, dict_visit, tac_local_dict, tac_visit_dict,
         ia_local=not local.es_usuario,
         ia_visit=not visit.es_usuario,
+        factor_medico_local=_factor_medico(local), factor_medico_visit=_factor_medico(visit),
     )
 
-    _aplicar_efectos_fisicos(jl, jv, plantel_local, plantel_visit, resultado)
+    _aplicar_efectos_fisicos(jl, jv, plantel_local, plantel_visit, resultado, _factor_medico(local), _factor_medico(visit))
     await _finalizar_fixture(db, fixture, local, visit, resultado["gh"], resultado["gv"])
 
     return {
@@ -1654,8 +1783,11 @@ async def _cerrar_jornada_del_dia(db: AsyncSession, fixture: Calendario) -> tupl
             resultado = simulate_match(
                 dict_local, dict_visit, tac_local_dict, tac_visit_dict,
                 ia_local=not local.es_usuario, ia_visit=not visit.es_usuario,
+                factor_medico_local=_factor_medico(local), factor_medico_visit=_factor_medico(visit),
             )
-            updates_jugador.extend(_calcular_efectos_fisicos(plantel_local, plantel_visit, resultado))
+            updates_jugador.extend(_calcular_efectos_fisicos(
+                plantel_local, plantel_visit, resultado, _factor_medico(local), _factor_medico(visit),
+            ))
             if otro.tipo == "LIGA":
                 updates_equipo.append(_calcular_update_equipo(local, resultado["gh"], resultado["gv"]))
                 updates_equipo.append(_calcular_update_equipo(visit, resultado["gv"], resultado["gh"]))
@@ -1701,6 +1833,7 @@ async def simular_primer_tiempo(datos: dict, db: AsyncSession = Depends(get_db))
         dict_local, dict_visit, tac_local_dict, tac_visit_dict,
         ia_local=not local.es_usuario, ia_visit=not visit.es_usuario,
         minuto_inicio=1, minuto_fin=45,
+        factor_medico_local=_factor_medico(local), factor_medico_visit=_factor_medico(visit),
     )
     # El desgaste y las lesiones del primer tiempo se aplican ya mismo — así,
     # si hay que hacer cambios en el entretiempo, reflejan la realidad del
@@ -1743,9 +1876,10 @@ async def simular_segundo_tiempo(datos: dict, db: AsyncSession = Depends(get_db)
         dict_local, dict_visit, tac_local_dict, tac_visit_dict,
         ia_local=not local.es_usuario, ia_visit=not visit.es_usuario,
         minuto_inicio=46, minuto_fin=90, gh_inicial=gh_medio, gv_inicial=gv_medio,
+        factor_medico_local=_factor_medico(local), factor_medico_visit=_factor_medico(visit),
     )
 
-    _aplicar_efectos_fisicos(jl, jv, plantel_local, plantel_visit, resultado)
+    _aplicar_efectos_fisicos(jl, jv, plantel_local, plantel_visit, resultado, _factor_medico(local), _factor_medico(visit))
     await _finalizar_fixture(db, fixture, local, visit, resultado["gh"], resultado["gv"])
     log_ia, nueva_temporada = await _cerrar_jornada_del_dia(db, fixture)
 
@@ -1833,9 +1967,11 @@ async def configurar_entrenamiento(datos: EntrenamientoIn, db: AsyncSession = De
     jugadores = (await db.execute(
         select(Jugador).where(Jugador.id_equipo == datos.id_equipo, Jugador.categoria == "PRIMERA")
     )).scalars().all()
-    aplicar_entrenamiento(jugadores, datos.foco, datos.intensidad)
-
     equipo = await db.get(Equipo, datos.id_equipo)
+    # +1% de probabilidad de mejora por nivel de Centro de Entrenamiento (tope 20).
+    bono_centro = (equipo.nivel_centro_entrenamiento if equipo else 0) * 0.01
+    aplicar_entrenamiento(jugadores, datos.foco, datos.intensidad, bono_centro)
+
     fecha = await _fecha_actual(db, equipo.id_partida)
     await _crear_mensaje(
         db, datos.id_equipo, "Cuerpo Técnico", "Plan de entrenamiento actualizado",
@@ -2690,6 +2826,93 @@ async def obtener_economia(id_equipo: int, db: AsyncSession = Depends(get_db)):
     }
 
 
+# ---------- INFRAESTRUCTURA ----------
+@app.get("/equipos/{id_equipo}/infraestructura", tags=["Infraestructura"])
+async def obtener_infraestructura(id_equipo: int, db: AsyncSession = Depends(get_db)):
+    equipo = await db.get(Equipo, id_equipo)
+    if not equipo:
+        raise HTTPException(status_code=404, detail="Equipo no encontrado")
+
+    pendientes = (await db.execute(
+        select(SolicitudObra).where(SolicitudObra.id_equipo == id_equipo, SolicitudObra.estado == "PENDIENTE")
+    )).scalars().all()
+    pendientes_por_tipo = {s.tipo_instalacion: s for s in pendientes}
+
+    instalaciones = []
+    for tipo in COSTO_BASE_INSTALACION:
+        nivel_actual = getattr(equipo, f"nivel_{tipo}")
+        solicitud = pendientes_por_tipo.get(tipo)
+        instalaciones.append({
+            "tipo": tipo,
+            "nombre": NOMBRE_INSTALACION[tipo],
+            "nivel_actual": nivel_actual,
+            "costo_proximo_nivel": costo_mejora_instalacion(tipo, nivel_actual) if nivel_actual < 20 else None,
+            "mantenimiento_mensual_actual": mantenimiento_mensual_instalacion(tipo, nivel_actual),
+            "solicitud_pendiente": {
+                "id_solicitud": solicitud.id_solicitud,
+                "nivel_objetivo": solicitud.nivel_objetivo,
+                "costo": solicitud.costo,
+                "fecha_solicitud": solicitud.fecha_solicitud.isoformat(),
+                "fecha_resolucion": solicitud.fecha_resolucion.isoformat(),
+            } if solicitud else None,
+        })
+
+    return {
+        "presupuesto_fichajes": equipo.presupuesto_fichajes,
+        "instalaciones": instalaciones,
+    }
+
+
+@app.post("/infraestructura/solicitar", tags=["Infraestructura"])
+async def solicitar_obra(datos: SolicitarObraIn, db: AsyncSession = Depends(get_db)):
+    equipo = await db.get(Equipo, datos.id_equipo)
+    if not equipo:
+        raise HTTPException(status_code=404, detail="Equipo no encontrado")
+    if datos.tipo_instalacion not in COSTO_BASE_INSTALACION:
+        raise HTTPException(status_code=400, detail="Tipo de instalación inválido")
+
+    nivel_actual = getattr(equipo, f"nivel_{datos.tipo_instalacion}")
+    if nivel_actual >= 20:
+        raise HTTPException(status_code=400, detail="Esta instalación ya está en su nivel máximo")
+
+    ya_pendiente = (await db.execute(
+        select(SolicitudObra).where(
+            SolicitudObra.id_equipo == datos.id_equipo,
+            SolicitudObra.tipo_instalacion == datos.tipo_instalacion,
+            SolicitudObra.estado == "PENDIENTE",
+        )
+    )).scalars().first()
+    if ya_pendiente:
+        raise HTTPException(status_code=400, detail="Ya hay una solicitud pendiente para esta instalación")
+
+    costo = costo_mejora_instalacion(datos.tipo_instalacion, nivel_actual)
+    partida = await db.get(Partida, equipo.id_partida)
+    confianza = partida.confianza_directiva if partida else directiva_engine.CONFIANZA_INICIAL
+    dias = directiva_engine.dias_espera_obra(confianza, costo, equipo.presupuesto_fichajes)
+    fecha = await _fecha_actual(db, equipo.id_partida)
+    fecha_resolucion = fecha + timedelta(days=dias)
+
+    solicitud = SolicitudObra(
+        id_partida=equipo.id_partida, id_equipo=datos.id_equipo, tipo_instalacion=datos.tipo_instalacion,
+        nivel_objetivo=nivel_actual + 1, costo=costo, fecha_solicitud=fecha, fecha_resolucion=fecha_resolucion,
+    )
+    db.add(solicitud)
+
+    nombre_instalacion = NOMBRE_INSTALACION[datos.tipo_instalacion]
+    await _crear_mensaje(
+        db, datos.id_equipo, "Directiva del Club", f"Solicitud enviada: {nombre_instalacion}",
+        f"Se elevó a la directiva el pedido de mejorar {nombre_instalacion} a nivel {nivel_actual + 1} "
+        f"(costo ${money(costo)}). Estimamos una respuesta para el {fecha_resolucion.strftime('%d/%m/%Y')}.",
+        "SISTEMA", fecha,
+    )
+
+    await db.commit()
+    return {
+        "status": "ok", "mensaje": f"Solicitud enviada a la directiva, respuesta estimada el {fecha_resolucion.strftime('%d/%m/%Y')}",
+        "fecha_resolucion": fecha_resolucion.isoformat(),
+    }
+
+
 # ---------- MERCADO: RECOMENDACIONES ESTILO SCOUTING ----------
 POSICIONES_CANCHA = ["POR", "DEF", "MED", "DEL"]
 
@@ -2748,10 +2971,11 @@ def _consejo_entrenamiento(plantel: list[Jugador]) -> str:
     promedios_attr = {
         "OFENSIVO": sum(j.ataque for j in plantel) / len(plantel),
         "DEFENSIVO": sum(j.defensa for j in plantel) / len(plantel),
+        "PASE": sum(j.pase for j in plantel) / len(plantel),
         "FISICO": sum(j.fisico for j in plantel) / len(plantel),
     }
     foco_sugerido, valor = min(promedios_attr.items(), key=lambda par: par[1])
-    etiqueta = {"OFENSIVO": "el ataque", "DEFENSIVO": "la defensa", "FISICO": "lo físico"}[foco_sugerido]
+    etiqueta = {"OFENSIVO": "el ataque", "DEFENSIVO": "la defensa", "PASE": "el pase", "FISICO": "lo físico"}[foco_sugerido]
     return f"Con la energía en buen nivel ({energia_prom:.0f}%), yo enfocaría el entrenamiento en {etiqueta} (promedio {valor:.0f}), que es lo más flojo del plantel ahora mismo."
 
 

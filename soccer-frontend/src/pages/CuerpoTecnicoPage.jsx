@@ -14,7 +14,7 @@ function RangoOverall({ objetivo }) {
   return <span className="font-bold text-slate-400">{objetivo.overall_rango[0]}-{objetivo.overall_rango[1]}</span>;
 }
 
-const FOCO_LABEL = { EQUILIBRADO: 'Equilibrado', OFENSIVO: 'Ofensivo', DEFENSIVO: 'Defensivo', FISICO: 'Físico', DESCANSO: 'Descanso' };
+const FOCO_LABEL = { EQUILIBRADO: 'Equilibrado', OFENSIVO: 'Ofensivo', DEFENSIVO: 'Defensivo', PASE: 'Pase', FISICO: 'Físico', DESCANSO: 'Descanso' };
 const INTENSIDAD_LABEL = { BAJA: 'Baja', MEDIA: 'Media', ALTA: 'Alta' };
 
 export default function CuerpoTecnicoPage({ API_URL, idEquipoUsuario }) {

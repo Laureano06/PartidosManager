@@ -133,12 +133,43 @@ class Equipo(Base):
     goles_favor: Mapped[int] = mapped_column(Integer, default=0)
     goles_contra: Mapped[int] = mapped_column(Integer, default=0)
 
+    # Infraestructura del club: 6 instalaciones, nivel 0-20 cada una. Suben
+    # mediante SolicitudObra (aprobación de la directiva, no es instantáneo)
+    # — ver engine/directiva_engine.py::evaluar_solicitud_obra y
+    # _procesar_solicitudes_obra en main.py. El bono que aporta cada una a
+    # su sistema respectivo vive junto a ese sistema (training_engine,
+    # injury_engine, academia_engine, _procesar_progreso_scouting).
+    nivel_centro_entrenamiento: Mapped[int] = mapped_column(Integer, default=0)
+    nivel_centro_medico: Mapped[int] = mapped_column(Integer, default=0)
+    nivel_analitica: Mapped[int] = mapped_column(Integer, default=0)
+    nivel_captacion_juvenil: Mapped[int] = mapped_column(Integer, default=0)
+    nivel_instalaciones_juveniles: Mapped[int] = mapped_column(Integer, default=0)
+    nivel_entrenadores_juveniles: Mapped[int] = mapped_column(Integer, default=0)
+
     jugadores: Mapped[list["Jugador"]] = relationship(
         back_populates="equipo", foreign_keys="Jugador.id_equipo", cascade="all, delete-orphan"
     )
     tactica: Mapped["Tactica"] = relationship(back_populates="equipo", uselist=False, cascade="all, delete-orphan")
     plan_entrenamiento: Mapped["PlanEntrenamiento"] = relationship(back_populates="equipo", uselist=False, cascade="all, delete-orphan")
     personal_tecnico: Mapped["PersonalTecnico"] = relationship(back_populates="equipo", uselist=False, cascade="all, delete-orphan")
+
+
+class SolicitudObra(Base):
+    """Pedido de mejora de una instalación de infraestructura, pendiente de
+    aprobación de la directiva (tarda, no es instantáneo) — mismo espíritu
+    que OfertaClubDT. Ver engine/directiva_engine.py::evaluar_solicitud_obra
+    y _procesar_solicitudes_obra en main.py (llamado desde avanzar_dia)."""
+    __tablename__ = "solicitudes_obra"
+
+    id_solicitud: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    id_partida: Mapped[int] = mapped_column(ForeignKey("partidas.id_partida"))
+    id_equipo: Mapped[int] = mapped_column(ForeignKey("equipos.id_equipo"))
+    tipo_instalacion: Mapped[str] = mapped_column(String(40), nullable=False)
+    nivel_objetivo: Mapped[int] = mapped_column(Integer, nullable=False)
+    costo: Mapped[int] = mapped_column(Integer, nullable=False)
+    fecha_solicitud: Mapped[date] = mapped_column(Date, nullable=False)
+    fecha_resolucion: Mapped[date] = mapped_column(Date, nullable=False)
+    estado: Mapped[str] = mapped_column(String(15), default="PENDIENTE")  # PENDIENTE, APROBADA, RECHAZADA
 
 
 class Jugador(Base):
@@ -156,11 +187,48 @@ class Jugador(Base):
     nacionalidad: Mapped[str] = mapped_column(String(40), default="Argentina")
     edad: Mapped[int] = mapped_column(Integer, default=20)
 
+    # Estos 4 son PROMEDIOS DERIVADOS de los atributos de abajo (se recalculan
+    # cada vez que cambia alguno de sus componentes, ver
+    # engine/data_gen.py::recalcular_derivados) — se mantienen como columnas
+    # propias porque overall/el motor de partido/las negociaciones/la IA de
+    # jugadores siguen leyendo estos 4 nomás, sin tocarse por esta ampliación.
     ataque: Mapped[int] = mapped_column(Integer, default=50)
     defensa: Mapped[int] = mapped_column(Integer, default=50)
     pase: Mapped[int] = mapped_column(Integer, default=50)
     fisico: Mapped[int] = mapped_column(Integer, default=50)
     potencial: Mapped[int] = mapped_column(Integer, default=65)
+
+    # Atributos detallados estilo FM, TODOS en escala 1-99 (no 1-20) para ser
+    # consistentes con el resto del juego. Técnico (alimentan ataque/defensa/
+    # pase derivados — ver fórmulas en data_gen.py):
+    finalizacion: Mapped[int] = mapped_column(Integer, default=50)
+    regate: Mapped[int] = mapped_column(Integer, default=50)
+    primer_toque: Mapped[int] = mapped_column(Integer, default=50)
+    centros: Mapped[int] = mapped_column(Integer, default=50)
+    cabeceo: Mapped[int] = mapped_column(Integer, default=50)
+    marcaje: Mapped[int] = mapped_column(Integer, default=50)
+    entradas: Mapped[int] = mapped_column(Integer, default=50)
+    tiros_lejanos: Mapped[int] = mapped_column(Integer, default=50)
+    # Mental — hoy son "de sabor" (se muestran en la ficha, no alimentan
+    # ningún cálculo todavía; salvo valentía y visión/decisiones, que sí
+    # entran en defensa/pase derivados).
+    agresividad: Mapped[int] = mapped_column(Integer, default=50)
+    valentia: Mapped[int] = mapped_column(Integer, default=50)
+    decisiones: Mapped[int] = mapped_column(Integer, default=50)
+    concentracion: Mapped[int] = mapped_column(Integer, default=50)
+    anticipacion: Mapped[int] = mapped_column(Integer, default=50)
+    compostura: Mapped[int] = mapped_column(Integer, default=50)
+    vision: Mapped[int] = mapped_column(Integer, default=50)
+    liderazgo: Mapped[int] = mapped_column(Integer, default=50)
+    # Físico (alimentan fisico derivado).
+    ritmo: Mapped[int] = mapped_column(Integer, default=50)
+    aceleracion: Mapped[int] = mapped_column(Integer, default=50)
+    resistencia: Mapped[int] = mapped_column(Integer, default=50)
+    fuerza: Mapped[int] = mapped_column(Integer, default=50)
+    agilidad: Mapped[int] = mapped_column(Integer, default=50)
+    # Portería: un solo atributo compuesto (no se desglosa en reflejos/juego
+    # de pies/colocación por separado) — solo relevante para POR.
+    porteria: Mapped[int] = mapped_column(Integer, default=50)
 
     energia: Mapped[int] = mapped_column(Integer, default=100)
     moral: Mapped[int] = mapped_column(Integer, default=75)

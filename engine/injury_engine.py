@@ -8,9 +8,11 @@ TIPOS_LESION = [
 ]
 
 
-def evaluar_lesion(energia: int) -> dict | None:
-    """Devuelve un dict de lesión si ocurre, o None."""
-    prob = 0.00012
+def evaluar_lesion(energia: int, factor_medico: float = 1.0) -> dict | None:
+    """Devuelve un dict de lesión si ocurre, o None. `factor_medico` es el
+    multiplicador de riesgo del Centro Médico del club (1.0 = sin efecto,
+    <1.0 = reduce el riesgo — ver nivel_centro_medico en Equipo)."""
+    prob = 0.00012 * factor_medico
     if energia < 40:
         prob *= 6
     if random.random() < prob:
