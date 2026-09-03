@@ -213,6 +213,10 @@ export default function MatchDayPage({ API_URL, idPartida, idEquipoUsuario, fech
   const [cambiosRealizados, setCambiosRealizados] = useState(0);
   const [titularSeleccionado, setTitularSeleccionado] = useState(null);
 
+  // Marcaje individual: instrucción efímera para el próximo partido, no se
+  // persiste en ningún lado — solo vive acá mientras dura esta pantalla.
+  const [jugadorMarcado, setJugadorMarcado] = useState('');
+
   useEffect(() => {
     if (!idEquipoUsuario) return;
     fetch(`${API_URL}/calendario/equipo/${idEquipoUsuario}`)
@@ -387,7 +391,10 @@ export default function MatchDayPage({ API_URL, idPartida, idEquipoUsuario, fech
       const res = await fetch(`${API_URL}/partidos/simular`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id_local: proximoPartido.id_local, id_visitante: proximoPartido.id_visitante }),
+        body: JSON.stringify({
+          id_local: proximoPartido.id_local, id_visitante: proximoPartido.id_visitante,
+          id_jugador_marcado: jugadorMarcado ? Number(jugadorMarcado) : null,
+        }),
       });
       const data = await res.json();
       setGolesFinalLocal(data.goles_local);
@@ -412,7 +419,10 @@ export default function MatchDayPage({ API_URL, idPartida, idEquipoUsuario, fech
       const res = await fetch(`${API_URL}/partidos/simular-primer-tiempo`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id_local: proximoPartido.id_local, id_visitante: proximoPartido.id_visitante }),
+        body: JSON.stringify({
+          id_local: proximoPartido.id_local, id_visitante: proximoPartido.id_visitante,
+          id_jugador_marcado: jugadorMarcado ? Number(jugadorMarcado) : null,
+        }),
       });
       const data = await res.json();
       setEventosPrimerTiempo(data.eventos || []);
@@ -444,6 +454,7 @@ export default function MatchDayPage({ API_URL, idPartida, idEquipoUsuario, fech
         body: JSON.stringify({
           id_local: proximoPartido.id_local, id_visitante: proximoPartido.id_visitante,
           goles_local: golesMedioLocal, goles_visitante: golesMedioVisit,
+          id_jugador_marcado: jugadorMarcado ? Number(jugadorMarcado) : null,
         }),
       });
       const data = await res.json();
@@ -565,6 +576,26 @@ export default function MatchDayPage({ API_URL, idPartida, idEquipoUsuario, fech
               ))}
               {titulares.length === 0 && <p className="text-xs text-slate-500 col-span-full">No se pudo armar la alineación.</p>}
             </div>
+          </div>
+
+          <div className="bg-[#121e36] border border-slate-800 rounded-2xl p-6 space-y-2">
+            <h2 className="text-sm font-bold text-white">Marcaje individual</h2>
+            <p className="text-[11px] text-slate-400">
+              Elegí un rival para marcar de cerca en este partido: baja su aporte ofensivo, pero tu defensa cede un poco de solidez por reacomodarse para seguirlo.
+            </p>
+            <select
+              value={jugadorMarcado}
+              onChange={(e) => setJugadorMarcado(e.target.value)}
+              aria-label="Jugador rival a marcar de cerca"
+              className="w-full bg-[#0b1326] border border-slate-700 p-2.5 rounded-lg text-white text-xs"
+            >
+              <option value="">Sin marcaje especial</option>
+              {titularesRival
+                .filter((j) => j.posicion === 'DEL' || j.posicion === 'MED')
+                .map((j) => (
+                  <option key={j.id_jugador} value={j.id_jugador}>{j.nombre} ({j.posicion_especifica || j.posicion})</option>
+                ))}
+            </select>
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">

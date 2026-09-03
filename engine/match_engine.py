@@ -65,7 +65,8 @@ def team_power(players: list[dict]) -> dict:
 
 def _pick_scorer(players: list[dict]) -> dict:
     pool = [p for p in players if p["posicion"] in ("DEL", "MED")] or players
-    return random.choice(pool)
+    pesos = [max(1, p["ataque"]) for p in pool]
+    return random.choices(pool, weights=pesos, k=1)[0]
 
 
 def simulate_match(

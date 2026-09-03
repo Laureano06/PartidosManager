@@ -1808,6 +1808,30 @@ async def _preparar_lineup(db: AsyncSession, fixture: Calendario):
     return local, visit, plantel_local, plantel_visit, jl, jv, dict_local, dict_visit, tac_local_dict, tac_visit_dict
 
 
+PENALIDAD_ATAQUE_MARCADO = 0.65
+PENALIDAD_DEFENSA_MARCADOR = 0.98
+
+
+def _aplicar_marcaje(dict_local: list[dict], dict_visit: list[dict], id_jugador_marcado: int | None) -> None:
+    """Instrucción de rival: marcar de cerca a UN jugador rival (DEL/MED)
+    para el próximo partido — reduce su aporte de ataque (y por lo tanto
+    su chance de ser goleador, ver _pick_scorer) a costa de un poco de
+    solidez defensiva pareja en todo el equipo que lo marca, por
+    reacomodarse para seguirlo. No persiste nada: es una elección efímera
+    del usuario para su próximo partido, mandada como parámetro al armar
+    la simulación. Si el jugador marcado no está en ninguna de las dos
+    listas (se transfirió, no es titular, etc.), no hace nada."""
+    if not id_jugador_marcado:
+        return
+    for equipo_marcado, equipo_marcador in ((dict_visit, dict_local), (dict_local, dict_visit)):
+        objetivo = next((p for p in equipo_marcado if p["id_jugador"] == id_jugador_marcado), None)
+        if objetivo:
+            objetivo["ataque"] = round(objetivo["ataque"] * PENALIDAD_ATAQUE_MARCADO)
+            for p in equipo_marcador:
+                p["defensa"] = round(p["defensa"] * PENALIDAD_DEFENSA_MARCADOR)
+            return
+
+
 def _calcular_efectos_fisicos(
     plantel_local: list[Jugador], plantel_visit: list[Jugador], resultado: dict,
     factor_medico_local: float = 1.0, factor_medico_visit: float = 1.0,
@@ -1940,8 +1964,9 @@ async def _finalizar_fixture(db: AsyncSession, fixture: Calendario, local: Equip
 
 
 # ---------- HELPER: JUGAR UN FIXTURE COMPLETO (simulación rápida) ----------
-async def _jugar_fixture(db: AsyncSession, fixture: Calendario) -> dict:
+async def _jugar_fixture(db: AsyncSession, fixture: Calendario, id_jugador_marcado: int | None = None) -> dict:
     local, visit, plantel_local, plantel_visit, jl, jv, dict_local, dict_visit, tac_local_dict, tac_visit_dict = await _preparar_lineup(db, fixture)
+    _aplicar_marcaje(dict_local, dict_visit, id_jugador_marcado)
     return await _simular_y_finalizar(db, fixture, local, visit, plantel_local, plantel_visit, jl, jv, dict_local, dict_visit, tac_local_dict, tac_visit_dict)
 
 
@@ -1989,7 +2014,7 @@ async def simular_partido(datos: dict, db: AsyncSession = Depends(get_db)):
     if not fixture:
         raise HTTPException(status_code=404, detail="No hay un partido pendiente entre esos equipos.")
 
-    resultado = await _jugar_fixture(db, fixture)
+    resultado = await _jugar_fixture(db, fixture, datos.get("id_jugador_marcado"))
     resultado["mercado_ia"], resultado["nueva_temporada"] = await _cerrar_jornada_del_dia(db, fixture)
     await db.commit()
     return resultado
@@ -2107,6 +2132,7 @@ async def simular_primer_tiempo(datos: dict, db: AsyncSession = Depends(get_db))
         raise HTTPException(status_code=404, detail="No hay un partido pendiente entre esos equipos.")
 
     local, visit, plantel_local, plantel_visit, jl, jv, dict_local, dict_visit, tac_local_dict, tac_visit_dict = await _preparar_lineup(db, fixture)
+    _aplicar_marcaje(dict_local, dict_visit, datos.get("id_jugador_marcado"))
 
     resultado = simulate_match(
         dict_local, dict_visit, tac_local_dict, tac_visit_dict,
@@ -2151,6 +2177,7 @@ async def simular_segundo_tiempo(datos: dict, db: AsyncSession = Depends(get_db)
     # Se vuelve a armar la alineación acá — si el usuario hizo cambios en el
     # entretiempo (tácticas, titulares), el segundo tiempo ya sale con eso.
     local, visit, plantel_local, plantel_visit, jl, jv, dict_local, dict_visit, tac_local_dict, tac_visit_dict = await _preparar_lineup(db, fixture)
+    _aplicar_marcaje(dict_local, dict_visit, datos.get("id_jugador_marcado"))
 
     fm_local = _factor_medico(await _bono_red_equipo(db, local))
     fm_visit = _factor_medico(await _bono_red_equipo(db, visit))
