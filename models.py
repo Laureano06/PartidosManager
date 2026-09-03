@@ -162,6 +162,12 @@ class AfiliacionClub(Base):
     porcentaje: Mapped[int] = mapped_column(Integer, nullable=False)
     tipo_relacion: Mapped[str] = mapped_column(String(15), nullable=False)  # PROPIETARIO, SATELITE, MINORITARIO
     fecha_adquisicion: Mapped[date] = mapped_column(Date, nullable=False)
+    # Solo togglable por el inversor cuando tipo_relacion es SATELITE o
+    # PROPIETARIO — habilita el pipeline de préstamos/transferencias y
+    # gestionar táctica/entrenamiento/fichajes del participado (ver
+    # clubActivo en el frontend y ejecutar_ia_mercado, que lo excluye del
+    # mercado autónomo de la IA mientras esté habilitado).
+    influencia_habilitada: Mapped[bool] = mapped_column(Boolean, default=False)
 
 
 class SolicitudParticipacion(Base):

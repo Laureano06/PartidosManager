@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
 import Modal from './Modal';
 import MiniPitchPosicion from './MiniPitchPosicion';
 import { formatearDuracion } from '../utils/formato';
@@ -191,12 +192,16 @@ export default function PlayerDetailModal({ jugador, open, onClose, API_URL, onN
     : [];
 
   return (
-    <Modal open={open} onClose={onClose}>
+    <Modal open={open} onClose={onClose} labelledBy="player-modal-title">
       <div className="p-8 sm:p-12 max-w-5xl mx-auto space-y-8">
         <div className="flex items-start justify-between gap-4 border-b border-slate-800 pb-6">
           <div>
-            <h3 className="text-3xl font-black text-white">{datos.nombre}</h3>
-            <p className="text-sm text-slate-400 mt-1">{datos.club || 'Tu plantel'} · {datos.nacionalidad}</p>
+            <h3 id="player-modal-title" className="text-3xl font-black text-white">{datos.nombre}</h3>
+            <p className="text-sm text-slate-400 mt-1">
+              {datos.id_equipo ? (
+                <Link to={`/club/${datos.id_equipo}`} className="hover:text-sky-400 hover:underline">{datos.club || 'Tu plantel'}</Link>
+              ) : (datos.club || 'Tu plantel')} · {datos.nacionalidad}
+            </p>
             {datos.rol && (
               <span className={`inline-block mt-3 text-xs font-bold px-3 py-1 rounded-full border ${ROL_CLASS[datos.rol] || ROL_CLASS.RESERVA}`}>
                 {ROL_LABEL[datos.rol] || datos.rol}
@@ -228,11 +233,11 @@ export default function PlayerDetailModal({ jugador, open, onClose, API_URL, onN
             <span className="bg-sky-500 text-slate-950 font-black text-2xl px-4 py-2 rounded-2xl">
               {formatOverall(datos)}
             </span>
-            <span className="text-[10px] text-slate-500 font-bold">POT {formatPotencial(datos)}</span>
+            <span className="text-[10px] text-slate-400 font-bold">POT {formatPotencial(datos)}</span>
           </div>
         </div>
 
-        <div className="grid grid-cols-[160px_1fr] gap-4 sm:gap-6 items-start">
+        <div className="grid grid-cols-1 sm:grid-cols-[160px_1fr] gap-4 sm:gap-6 items-start">
           <div className="space-y-4">
             <MiniPitchPosicion posicion={datos.posicion} posicionEspecifica={datos.posicion_especifica} />
             <div className="text-xs space-y-0">
@@ -274,7 +279,7 @@ export default function PlayerDetailModal({ jugador, open, onClose, API_URL, onN
                 <Stat label="Pase" value={datos.pase} />
                 <Stat label="Físico" value={datos.fis ?? datos.fisico} />
                 {datos.scouting_progreso != null && (
-                  <p className="col-span-full text-xs text-slate-500 pt-2">
+                  <p className="col-span-full text-xs text-slate-400 pt-2">
                     Desglose de atributos disponible al llegar a 100% de scouting (hoy {datos.scouting_progreso}%).
                   </p>
                 )}
@@ -289,7 +294,7 @@ export default function PlayerDetailModal({ jugador, open, onClose, API_URL, onN
             <div className="overflow-x-auto scroll-slide">
               <table className="w-full text-xs min-w-[420px]">
                 <thead>
-                  <tr className="text-slate-500 text-left">
+                  <tr className="text-slate-400 text-left">
                     <th className="pb-2 pr-4">Temporada</th>
                     <th className="pb-2 pr-4">Club</th>
                     <th className="pb-2 pr-4">Edad</th>

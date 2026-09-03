@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 import ContractModal from '../components/ContractModal';
 import NegociacionFichajeModal from '../components/NegociacionFichajeModal';
 import PlayerDetailModal from '../components/PlayerDetailModal';
@@ -27,6 +27,7 @@ export default function MercadoPage({ API_URL, idEquipoUsuario, idPartida, plant
   const [jugadorACeder, setJugadorACeder] = useState(null);
   const [jugadorADialogar, setJugadorADialogar] = useState(null);
   const [negociaciones, setNegociaciones] = useState({ comprando: [] });
+  const [errorTransferible, setErrorTransferible] = useState(null);
   const idsComprando = useMemo(() => new Map(negociaciones.comprando.map((o) => [o.id_jugador, o])), [negociaciones.comprando]);
 
   const cargarNegociaciones = useCallback(() => {
@@ -48,16 +49,23 @@ export default function MercadoPage({ API_URL, idEquipoUsuario, idPartida, plant
 
   const toggleTransferible = async (jugador) => {
     const nuevoValor = !jugador.en_transferible;
+    setErrorTransferible(null);
     setPlantilla((prev) => prev.map((j) => (j.id_jugador === jugador.id_jugador ? { ...j, en_transferible: nuevoValor } : j)));
     setJugadorDetalle((prev) => (prev && prev.id_jugador === jugador.id_jugador ? { ...prev, en_transferible: nuevoValor } : prev));
     try {
-      await fetch(`${API_URL}/jugadores/${jugador.id_jugador}/transferible`, {
+      const r = await fetch(`${API_URL}/jugadores/${jugador.id_jugador}/transferible`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ en_transferible: nuevoValor }),
       });
+      if (!r.ok) throw new Error('respuesta no ok');
     } catch (error) {
       console.error('Error actualizando lista de transferibles:', error);
+      // El servidor no confirmó el cambio: revertimos el update optimista
+      // para que la UI no quede mintiendo sobre el estado real.
+      setPlantilla((prev) => prev.map((j) => (j.id_jugador === jugador.id_jugador ? { ...j, en_transferible: !nuevoValor } : j)));
+      setJugadorDetalle((prev) => (prev && prev.id_jugador === jugador.id_jugador ? { ...prev, en_transferible: !nuevoValor } : prev));
+      setErrorTransferible(`No se pudo actualizar la lista de transferibles de ${jugador.nombre}. Probá de nuevo.`);
     }
   };
 
@@ -93,6 +101,12 @@ export default function MercadoPage({ API_URL, idEquipoUsuario, idPartida, plant
 
   return (
     <div className="space-y-6">
+      {errorTransferible && (
+        <div className="bg-rose-950/60 border border-rose-500/40 text-rose-300 rounded-xl p-3 text-xs flex items-center justify-between gap-3">
+          <span>{errorTransferible}</span>
+          <button onClick={() => setErrorTransferible(null)} className="text-rose-300 hover:text-rose-100 font-bold shrink-0">✕</button>
+        </div>
+      )}
       <div className="bg-[#121e36] border border-slate-800 rounded-2xl p-5 space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
@@ -115,10 +129,10 @@ export default function MercadoPage({ API_URL, idEquipoUsuario, idPartida, plant
           </div>
         </div>
 
-        <div className="grid grid-cols-4 gap-2">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
           {Object.entries(datos.promedios_por_posicion).map(([pos, valor]) => (
             <div key={pos} className="bg-[#0b1326] border border-slate-800 rounded-xl p-3 text-center">
-              <p className="text-[10px] text-slate-500">{pos}</p>
+              <p className="text-[10px] text-slate-400">{pos}</p>
               <p className="text-sm font-bold text-white">{valor || '—'}</p>
             </div>
           ))}
@@ -128,10 +142,11 @@ export default function MercadoPage({ API_URL, idEquipoUsuario, idPartida, plant
       {tab === 'entrada' && (
         <div className="bg-[#121e36] border border-slate-800 rounded-2xl p-6">
           <h2 className="text-sm font-bold text-white mb-1">Recomendaciones de futbolista</h2>
-          <p className="text-[11px] text-slate-500 mb-4">Jugadores del mercado que mejoran tus posiciones más flojas, ordenados por prioridad.</p>
+          <p className="text-[11px] text-slate-400 mb-4">Jugadores del mercado que mejoran tus posiciones más flojas, ordenados por prioridad.</p>
           {datos.recomendaciones.length === 0 ? (
-            <p className="text-xs text-slate-500">No encontramos jugadores que mejoren tu plantel en este momento.</p>
+            <p className="text-xs text-slate-400">No encontramos jugadores que mejoren tu plantel en este momento.</p>
           ) : (
+            <div className="overflow-x-auto">
             <table className="w-full text-left text-xs">
               <thead>
                 <tr className="border-b border-slate-800 text-slate-400">
@@ -150,8 +165,19 @@ export default function MercadoPage({ API_URL, idEquipoUsuario, idPartida, plant
                 {datos.recomendaciones.map((j) => (
                   <tr key={j.id_jugador} className="border-b border-slate-800/40 hover:bg-[#0b1326]">
                     <td className="p-2"><BadgePrioridad prioridad={j.prioridad} /></td>
-                    <td className="p-2 font-bold text-slate-200 cursor-pointer" onClick={() => setJugadorDetalle(j)}>{j.nombre}</td>
-                    <td className="p-2 text-slate-400">{j.club}</td>
+                    <td
+                      className="p-2 font-bold text-slate-200 cursor-pointer focus-visible:outline focus-visible:outline-sky-500"
+                      onClick={() => setJugadorDetalle(j)}
+                      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setJugadorDetalle(j); } }}
+                      role="button"
+                      tabIndex={0}
+                      aria-label={`Ver ficha de ${j.nombre}`}
+                    >
+                      {j.nombre}
+                    </td>
+                    <td className="p-2 text-slate-400">
+                      {j.id_equipo ? <Link to={`/club/${j.id_equipo}`} className="hover:text-sky-400 hover:underline" onClick={(e) => e.stopPropagation()}>{j.club}</Link> : j.club}
+                    </td>
                     <td className="p-2 text-sky-400" title={j.posicion}>{j.posicion_especifica || j.posicion}</td>
                     <td className="p-2 text-slate-300">{j.edad}</td>
                     <td className="p-2 font-bold text-white">{formatOverall(j)}</td>
@@ -165,7 +191,7 @@ export default function MercadoPage({ API_URL, idEquipoUsuario, idPartida, plant
                           Se unirá a tu club libre el {j.fecha_fin_contrato ? new Date(`${j.fecha_fin_contrato}T00:00:00`).toLocaleDateString('es-AR') : '?'}
                         </span>
                       ) : j.id_equipo_precontrato ? (
-                        <span className="text-[10px] text-slate-500">Ya firmó precontrato con otro club</span>
+                        <span className="text-[10px] text-slate-400">Ya firmó precontrato con otro club</span>
                       ) : j.asequible ? (
                         <button onClick={() => irAFichar(j)} className="bg-sky-500 hover:bg-sky-400 text-slate-950 font-bold px-3 py-1 rounded text-xs">
                           Ir a fichar
@@ -178,6 +204,7 @@ export default function MercadoPage({ API_URL, idEquipoUsuario, idPartida, plant
                 ))}
               </tbody>
             </table>
+            </div>
           )}
         </div>
       )}
@@ -185,10 +212,11 @@ export default function MercadoPage({ API_URL, idEquipoUsuario, idPartida, plant
       {tab === 'salida' && (
         <div className="bg-[#121e36] border border-slate-800 rounded-2xl p-6">
           <h2 className="text-sm font-bold text-white mb-1">Jugadores con salida recomendada</h2>
-          <p className="text-[11px] text-slate-500 mb-4">Jugadores propios que rinden por debajo del promedio del equipo o que suman poco rodaje.</p>
+          <p className="text-[11px] text-slate-400 mb-4">Jugadores propios que rinden por debajo del promedio del equipo o que suman poco rodaje.</p>
           {datos.oportunidades_salida.length === 0 ? (
-            <p className="text-xs text-slate-500">No hay jugadores que convenga liberar por ahora.</p>
+            <p className="text-xs text-slate-400">No hay jugadores que convenga liberar por ahora.</p>
           ) : (
+            <div className="overflow-x-auto">
             <table className="w-full text-left text-xs">
               <thead>
                 <tr className="border-b border-slate-800 text-slate-400">
@@ -204,7 +232,16 @@ export default function MercadoPage({ API_URL, idEquipoUsuario, idPartida, plant
               <tbody>
                 {datos.oportunidades_salida.map((j) => (
                   <tr key={j.id_jugador} className="border-b border-slate-800/40 hover:bg-[#0b1326]">
-                    <td className="p-2 font-bold text-slate-200 cursor-pointer" onClick={() => verEnPanel(j)}>{j.nombre}</td>
+                    <td
+                      className="p-2 font-bold text-slate-200 cursor-pointer focus-visible:outline focus-visible:outline-sky-500"
+                      onClick={() => verEnPanel(j)}
+                      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); verEnPanel(j); } }}
+                      role="button"
+                      tabIndex={0}
+                      aria-label={`Ver ficha de ${j.nombre}`}
+                    >
+                      {j.nombre}
+                    </td>
                     <td className="p-2 text-sky-400" title={j.posicion}>{j.posicion_especifica || j.posicion}</td>
                     <td className="p-2 text-slate-300">{j.edad}</td>
                     <td className="p-2 font-bold text-white">{j.overall}</td>
@@ -219,6 +256,7 @@ export default function MercadoPage({ API_URL, idEquipoUsuario, idPartida, plant
                 ))}
               </tbody>
             </table>
+            </div>
           )}
         </div>
       )}

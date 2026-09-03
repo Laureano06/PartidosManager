@@ -24,7 +24,7 @@ export default function TablaPage({ API_URL, idPartida }) {
         <h1 className="text-lg font-black text-white mt-1">Tabla de Posiciones</h1>
       </div>
 
-      <div ref={ref} {...dragHandlers} className="flex-1 min-h-0 overflow-y-auto scroll-slide cursor-grab pr-1">
+      <div ref={ref} {...dragHandlers} className="flex-1 min-h-0 overflow-y-auto overflow-x-auto scroll-slide cursor-grab pr-1">
         {cargando ? (
           <p className="text-xs text-slate-400">Cargando tabla...</p>
         ) : (
@@ -47,7 +47,9 @@ export default function TablaPage({ API_URL, idPartida }) {
               {tabla.map((row, i) => (
                 <tr key={row.id_equipo} className={`border-b border-slate-800/40 ${row.es_usuario ? 'bg-sky-950/40 font-bold text-sky-300' : ''}`}>
                   <td className="p-3">{i + 1}</td>
-                  <td className="p-3">{row.nombre}</td>
+                  <td className="p-3">
+                    <Link to={`/club/${row.id_equipo}`} className="hover:text-sky-400 hover:underline">{row.nombre}</Link>
+                  </td>
                   <td className="p-3">{row.jugados}</td>
                   <td className="p-3">{row.ganados}</td>
                   <td className="p-3">{row.empatados}</td>

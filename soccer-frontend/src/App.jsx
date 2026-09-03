@@ -25,6 +25,7 @@ import CalendarioPage from './pages/CalendarioPage';
 import TablaPage from './pages/TablaPage';
 import MatchDayPage from './pages/MatchDayPage';
 import JugarPage from './pages/JugarPage';
+import ClubPage from './pages/ClubPage';
 
 const API_URL = "http://127.0.0.1:8000";
 const INICIO_TEMPORADA = new Date(2027, 1, 1); // debe coincidir con seed.py: INICIO_TEMPORADA
@@ -33,8 +34,16 @@ const INICIO_TEMPORADA = new Date(2027, 1, 1); // debe coincidir con seed.py: IN
 function GameLayout({
   fechaActualDate, diaNumero, avanzarDia, esDiaDePartido, presupuesto, nombreClubUsuario, escudoClubUsuario, confianzaDirectiva,
   plantilla, setPlantilla, idEquipoUsuario, idPartida, fechaActualISO, onPartidoJugado, refrescarEquipo, cargarPlantilla,
-  simularHasta, resultadoSimulacion, cambiarDeCarrera, volverAlInicio, onEstadoCambiado,
+  simularHasta, resultadoSimulacion, cambiarDeCarrera, volverAlInicio, onEstadoCambiado, clubActivo, setClubActivo,
+  plantillaClubActivo, setPlantillaClubActivo, refrescarPlantillasRelevantes,
 }) {
+  // Las pantallas de GESTIÓN de un club (táctica, cuerpo técnico, mercado,
+  // plantel, academia, economía) operan sobre `clubActivo` — por defecto tu
+  // propio club, pero cambia si activás la influencia sobre un club afiliado
+  // (ver ClubPage). Las de tu carrera como DT en sí (panel, calendario,
+  // multiclub, directiva) siempre quedan atadas a `idEquipoUsuario`.
+  const gestionandoOtroClub = clubActivo !== idEquipoUsuario;
+
   return (
     <div className="h-screen bg-[#0b1326] text-slate-100 flex flex-col font-sans overflow-hidden">
       <Header
@@ -46,6 +55,13 @@ function GameLayout({
         resultadoSimulacion={resultadoSimulacion}
       />
 
+      {gestionandoOtroClub && (
+        <div className="bg-amber-950/80 border-b border-amber-500/40 text-amber-300 text-xs font-bold text-center py-1.5 shrink-0">
+          Estás gestionando un club afiliado (no tu carrera principal) —{' '}
+          <button onClick={() => setClubActivo(idEquipoUsuario)} className="underline hover:text-amber-100">volver a tu club</button>
+        </div>
+      )}
+
       <div className="flex flex-1 min-h-0">
         <Sidebar
           presupuesto={presupuesto}
@@ -54,9 +70,13 @@ function GameLayout({
           confianzaDirectiva={confianzaDirectiva}
           cambiarDeCarrera={cambiarDeCarrera}
           volverAlInicio={volverAlInicio}
+          API_URL={API_URL}
+          idEquipoUsuario={idEquipoUsuario}
+          clubActivo={clubActivo}
+          setClubActivo={setClubActivo}
         />
 
-        <main className="flex-1 p-6 overflow-y-auto scroll-slide min-h-0">
+        <main className="flex-1 px-6 pb-6 pt-16 sm:pt-6 overflow-y-auto scroll-slide min-h-0">
           <Routes>
             <Route path="/" element={<Navigate to="/panel" replace />} />
             <Route path="/panel" element={<PanelPage API_URL={API_URL} idEquipoUsuario={idEquipoUsuario} idPartida={idPartida} fechaActual={fechaActualISO} />} />
@@ -64,15 +84,16 @@ function GameLayout({
             <Route path="/buzon" element={<BuzonPage API_URL={API_URL} idEquipoUsuario={idEquipoUsuario} />} />
             <Route path="/calendario" element={<CalendarioPage API_URL={API_URL} idEquipoUsuario={idEquipoUsuario} fechaActual={fechaActualISO} />} />
             <Route path="/tabla" element={<TablaPage API_URL={API_URL} idPartida={idPartida} />} />
-            <Route path="/equipo" element={<PlantelPage plantilla={plantilla} setPlantilla={setPlantilla} API_URL={API_URL} idEquipoUsuario={idEquipoUsuario} idPartida={idPartida} />} />
-            <Route path="/tacticas" element={<TacticasPage plantilla={plantilla} setPlantilla={setPlantilla} API_URL={API_URL} idEquipoUsuario={idEquipoUsuario} />} />
-            <Route path="/transferencias" element={<TransferenciasPage API_URL={API_URL} idEquipoUsuario={idEquipoUsuario} idPartida={idPartida} onPresupuestoCambiado={refrescarEquipo} onPlantillaCambiada={cargarPlantilla} />} />
-            <Route path="/mercado" element={<MercadoPage API_URL={API_URL} idEquipoUsuario={idEquipoUsuario} idPartida={idPartida} plantilla={plantilla} setPlantilla={setPlantilla} onPresupuestoCambiado={refrescarEquipo} onPlantillaCambiada={cargarPlantilla} />} />
+            <Route path="/club/:idEquipo" element={<ClubPage API_URL={API_URL} idEquipoUsuario={idEquipoUsuario} idPartida={idPartida} clubActivo={clubActivo} setClubActivo={setClubActivo} />} />
+            <Route path="/equipo" element={<PlantelPage plantilla={plantillaClubActivo} setPlantilla={setPlantillaClubActivo} API_URL={API_URL} idEquipoUsuario={clubActivo} idPartida={idPartida} />} />
+            <Route path="/tacticas" element={<TacticasPage plantilla={plantillaClubActivo} setPlantilla={setPlantillaClubActivo} API_URL={API_URL} idEquipoUsuario={clubActivo} />} />
+            <Route path="/transferencias" element={<TransferenciasPage API_URL={API_URL} idEquipoUsuario={clubActivo} idPartida={idPartida} onPresupuestoCambiado={refrescarEquipo} onPlantillaCambiada={refrescarPlantillasRelevantes} />} />
+            <Route path="/mercado" element={<MercadoPage API_URL={API_URL} idEquipoUsuario={clubActivo} idPartida={idPartida} plantilla={plantillaClubActivo} setPlantilla={setPlantillaClubActivo} onPresupuestoCambiado={refrescarEquipo} onPlantillaCambiada={refrescarPlantillasRelevantes} />} />
             <Route path="/desarrollo" element={<DesarrolloPage API_URL={API_URL} idEquipoUsuario={idEquipoUsuario} />} />
-            <Route path="/academia" element={<AcademiaPage API_URL={API_URL} idEquipoUsuario={idEquipoUsuario} idPartida={idPartida} />} />
-            <Route path="/cuerpo-tecnico" element={<CuerpoTecnicoPage API_URL={API_URL} idEquipoUsuario={idEquipoUsuario} />} />
+            <Route path="/academia" element={<AcademiaPage API_URL={API_URL} idEquipoUsuario={clubActivo} idPartida={idPartida} />} />
+            <Route path="/cuerpo-tecnico" element={<CuerpoTecnicoPage API_URL={API_URL} idEquipoUsuario={clubActivo} />} />
             <Route path="/multiclub" element={<MulticlubPage API_URL={API_URL} idEquipoUsuario={idEquipoUsuario} />} />
-            <Route path="/economia" element={<EconomiaPage API_URL={API_URL} idEquipoUsuario={idEquipoUsuario} />} />
+            <Route path="/economia" element={<EconomiaPage API_URL={API_URL} idEquipoUsuario={clubActivo} />} />
             <Route path="/directiva" element={<DirectivaPage API_URL={API_URL} idPartida={idPartida} onEstadoCambiado={onEstadoCambiado} />} />
             <Route path="/jugar" element={<JugarPage />} />
             <Route path="*" element={<Navigate to="/panel" replace />} />
@@ -98,6 +119,15 @@ export default function App() {
   const [escudoClubUsuario, setEscudoClubUsuario] = useState(null);
   const [presupuesto, setPresupuesto] = useState(0);
   const [plantilla, setPlantilla] = useState([]);
+  // Club que las pantallas de GESTIÓN (Tácticas, Cuerpo Técnico, Mercado,
+  // Plantel, Academia, Economía) usan como `id_equipo` — por defecto tu
+  // propio club, pero cambia si activás la influencia sobre un club afiliado
+  // (ver ClubPage.jsx). `plantilla` de arriba sigue atada SIEMPRE a tu propio
+  // club (la usa MatchDayPage para tu plantel de partido, que nunca debe
+  // depender de qué club estés gestionando en un momento dado); por eso el
+  // plantel del club activo se maneja aparte, en `plantillaClubActivo`.
+  const [clubActivo, setClubActivo] = useState(null);
+  const [plantillaClubActivo, setPlantillaClubActivo] = useState([]);
   const [fechaActualISO, setFechaActualISO] = useState(null);
   const [proximoPartidoFecha, setProximoPartidoFecha] = useState(null);
   const [avanzandoDia, setAvanzandoDia] = useState(false);
@@ -173,6 +203,10 @@ export default function App() {
 
   useEffect(() => { cargarEquipoUsuario(); }, [cargarEquipoUsuario]);
 
+  // El club activo arranca siendo siempre el tuyo propio — se resetea acá
+  // cada vez que cambia idEquipoUsuario (carga inicial, cambio de carrera).
+  useEffect(() => { setClubActivo(idEquipoUsuario); }, [idEquipoUsuario]);
+
   // Directiva: se refresca al cargar, y de nuevo cada vez que avanzar el día
   // (o simular varios) puede haber cruzado un fin de temporada — si
   // estado_dt deja de ser NORMAL, se bloquea el juego con DecisionDTPage.
@@ -209,6 +243,24 @@ export default function App() {
       .then(setPlantilla)
       .catch((error) => console.error('Error cargando la plantilla:', error));
   }, [idEquipoUsuario]);
+
+  const cargarPlantillaClubActivo = useCallback(() => {
+    if (!clubActivo) return;
+    fetch(`${API_URL}/equipos/${clubActivo}/jugadores`)
+      .then((r) => r.json())
+      .then(setPlantillaClubActivo)
+      .catch((error) => console.error('Error cargando la plantilla del club activo:', error));
+  }, [clubActivo]);
+
+  useEffect(() => { cargarPlantillaClubActivo(); }, [cargarPlantillaClubActivo]);
+
+  // Refresca AMBOS plantel (el tuyo y el del club activo) — cuando coinciden
+  // (caso normal) da lo mismo de cuál vino el cambio; cuando no, mantiene
+  // sincronizados tanto tu plantel de partido como el del club que gestionás.
+  const refrescarPlantillasRelevantes = useCallback(() => {
+    cargarPlantilla();
+    cargarPlantillaClubActivo();
+  }, [cargarPlantilla, cargarPlantillaClubActivo]);
 
   const cargarProximoPartido = useCallback(() => {
     if (!idEquipoUsuario) return;
@@ -350,6 +402,11 @@ export default function App() {
         resultadoSimulacion={resultadoSimulacion}
         cambiarDeCarrera={cambiarDeCarrera}
         volverAlInicio={volverAlInicio}
+        clubActivo={clubActivo}
+        setClubActivo={setClubActivo}
+        plantillaClubActivo={plantillaClubActivo}
+        setPlantillaClubActivo={setPlantillaClubActivo}
+        refrescarPlantillasRelevantes={refrescarPlantillasRelevantes}
       />
     );
   }

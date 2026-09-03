@@ -80,14 +80,14 @@ export default function CalendarioPage({ API_URL, idEquipoUsuario, fechaActual }
             <h1 className="text-2xl font-black text-white mt-1 tracking-wide">CALENDARIO</h1>
           </div>
           <div className="flex items-center gap-2">
-            <button onClick={() => cambiarMes(-1)} className="w-8 h-8 rounded-lg bg-[#121e36] border border-slate-800 text-slate-300 hover:border-sky-500/50">‹</button>
-            <button onClick={() => cambiarMes(1)} className="w-8 h-8 rounded-lg bg-[#121e36] border border-slate-800 text-slate-300 hover:border-sky-500/50">›</button>
+            <button onClick={() => cambiarMes(-1)} aria-label="Mes anterior" className="w-8 h-8 rounded-lg bg-[#121e36] border border-slate-800 text-slate-300 hover:border-sky-500/50">‹</button>
+            <button onClick={() => cambiarMes(1)} aria-label="Mes siguiente" className="w-8 h-8 rounded-lg bg-[#121e36] border border-slate-800 text-slate-300 hover:border-sky-500/50">›</button>
           </div>
         </div>
 
         <div className="grid grid-cols-7 shrink-0 border-b border-slate-800 pb-2 mb-1">
           {DIAS_SEMANA.map((d) => (
-            <p key={d} className="text-[10px] font-bold text-slate-500 text-center tracking-widest">{d}</p>
+            <p key={d} className="text-[10px] font-bold text-slate-400 text-center tracking-widest">{d}</p>
           ))}
         </div>
 
@@ -141,8 +141,12 @@ export default function CalendarioPage({ API_URL, idEquipoUsuario, fechaActual }
             <p className={`text-[10px] font-bold uppercase ${proximoPartido.tipo === 'COPA' ? 'text-amber-400' : 'text-sky-400'}`}>
               {proximoPartido.tipo === 'COPA' ? (proximoPartido.nombre_competencia || 'Copa Internacional') : 'Liga'}
             </p>
-            <p className="text-sm font-bold text-white truncate">{proximoPartido.nombre_local} vs {proximoPartido.nombre_visitante}</p>
-            <p className="text-xs text-slate-500">{proximoPartido.fecha}</p>
+            <p className="text-sm font-bold text-white truncate">
+              <Link to={`/club/${proximoPartido.id_local}`} className="hover:text-sky-400 hover:underline">{proximoPartido.nombre_local}</Link>
+              {' vs '}
+              <Link to={`/club/${proximoPartido.id_visitante}`} className="hover:text-sky-400 hover:underline">{proximoPartido.nombre_visitante}</Link>
+            </p>
+            <p className="text-xs text-slate-400">{proximoPartido.fecha}</p>
           </div>
         )}
       </div>

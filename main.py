@@ -7,7 +7,7 @@ from formato import money
 
 from fastapi import FastAPI, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy import select, or_, update, delete, func
+from sqlalchemy import select, or_, and_, update, delete, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database import engine, Base, get_db
@@ -22,7 +22,7 @@ from schemas import (
     RenovarContratoIn, PrecontratoIn, FicharLibreIn, NegociarContratoTraspasoIn,
     TransferibleIn, OfrecerJugadorIn, CederJugadorIn,
     CategoriaJugadorIn, IntakeDecidirIn, ReclutarJuvenilIn, ElegirDestinoDTIn,
-    OfertaParticipacionIn,
+    OfertaParticipacionIn, MoverJugadorIn, InfluenciaIn,
 )
 from engine.match_engine import simulate_match
 from engine.transfer_engine import evaluar_oferta
@@ -2574,8 +2574,8 @@ async def en_negociacion(id_equipo: int, db: AsyncSession = Depends(get_db)):
         return {
             "id_oferta": o.id_oferta, "id_jugador": o.id_jugador, "nombre_jugador": jugador.nombre,
             "posicion": jugador.posicion, "posicion_especifica": jugador.posicion_especifica, "overall": jugador.overall,
-            "nombre_comprador": comprador.nombre if comprador else "?",
-            "nombre_vendedor": vendedor.nombre if vendedor else "?",
+            "nombre_comprador": comprador.nombre if comprador else "?", "id_equipo_comprador": o.id_equipo_comprador,
+            "nombre_vendedor": vendedor.nombre if vendedor else "?", "id_equipo_vendedor": o.id_equipo_vendedor,
             "monto_oferta": o.monto_oferta, "estado": o.estado,
             "texto_incorporacion": texto_incorp,
         }
@@ -2602,21 +2602,35 @@ async def en_negociacion(id_equipo: int, db: AsyncSession = Depends(get_db)):
         await db.execute(select(Equipo).where(Equipo.id_equipo.in_(ids_clubes_precontrato)))
     ).scalars().all()} if ids_clubes_precontrato else {}
 
-    def _detalle_precontrato(j: Jugador, nombre_club: str) -> dict:
+    def _detalle_precontrato(j: Jugador, nombre_club: str, id_equipo_club: int | None) -> dict:
         return {
             "id_jugador": j.id_jugador, "nombre_jugador": j.nombre, "posicion": j.posicion,
             "posicion_especifica": j.posicion_especifica, "overall": j.overall, "potencial": j.potencial,
             "salario_precontrato": j.salario_precontrato,
             "fecha_fin_contrato": j.fecha_fin_contrato.isoformat() if j.fecha_fin_contrato else None,
-            "nombre_club": nombre_club,
+            "nombre_club": nombre_club, "id_equipo_club": id_equipo_club,
         }
 
     entrantes_por_id = {j.id_jugador: j for j in entrantes}
-    entrantes_detalle = [_detalle_precontrato(j, clubes_precontrato.get(j.id_equipo).nombre if j.id_equipo and clubes_precontrato.get(j.id_equipo) else "Agente libre") for j in entrantes]
+    entrantes_detalle = [
+        _detalle_precontrato(
+            j,
+            clubes_precontrato.get(j.id_equipo).nombre if j.id_equipo and clubes_precontrato.get(j.id_equipo) else "Agente libre",
+            j.id_equipo,
+        )
+        for j in entrantes
+    ]
     reportes_precontrato = await _reportes_de(db, id_equipo, list(entrantes_por_id))
     for d in entrantes_detalle:
         _aplicar_fog(d, entrantes_por_id[d["id_jugador"]], reportes_precontrato.get(d["id_jugador"]))
-    salientes_detalle = [_detalle_precontrato(j, clubes_precontrato[j.id_equipo_precontrato].nombre if j.id_equipo_precontrato in clubes_precontrato else "?") for j in salientes]
+    salientes_detalle = [
+        _detalle_precontrato(
+            j,
+            clubes_precontrato[j.id_equipo_precontrato].nombre if j.id_equipo_precontrato in clubes_precontrato else "?",
+            j.id_equipo_precontrato,
+        )
+        for j in salientes
+    ]
 
     return {
         "comprando": comprando_detalle,
@@ -3046,12 +3060,16 @@ async def obtener_multiclub(id_equipo: int, db: AsyncSession = Depends(get_db)):
         "socio_marca": socio_marca.nombre if socio_marca else None,
         "tus_participaciones": [
             {"id_equipo": a.id_equipo_participado, "nombre": equipos_contraparte[a.id_equipo_participado].nombre,
-             "porcentaje": a.porcentaje, "tipo_relacion": a.tipo_relacion}
+             "porcentaje": a.porcentaje, "tipo_relacion": a.tipo_relacion, "id_afiliacion": a.id_afiliacion,
+             "influencia_habilitada": a.influencia_habilitada,
+             "pipeline_habilitado": a.tipo_relacion in multiclub_engine.TIPOS_CON_PIPELINE}
             for a in tenencias if a.id_equipo_participado in equipos_contraparte
         ],
         "participaciones_sobre_tu_club": [
             {"id_equipo": a.id_equipo_inversor, "nombre": equipos_contraparte[a.id_equipo_inversor].nombre,
-             "porcentaje": a.porcentaje, "tipo_relacion": a.tipo_relacion}
+             "porcentaje": a.porcentaje, "tipo_relacion": a.tipo_relacion, "id_afiliacion": a.id_afiliacion,
+             "influencia_habilitada": a.influencia_habilitada,
+             "pipeline_habilitado": a.tipo_relacion in multiclub_engine.TIPOS_CON_PIPELINE}
             for a in participaciones_sobre_mi if a.id_equipo_inversor in equipos_contraparte
         ],
         "solicitudes_pendientes": [
@@ -3205,6 +3223,108 @@ async def ofertar_participacion(datos: OfertaParticipacionIn, db: AsyncSession =
         "mensaje": f"Solicitud enviada, primera respuesta estimada el {fecha_resolucion.strftime('%d/%m/%Y')}",
         "fecha_resolucion": fecha_resolucion.isoformat(),
     }
+
+
+@app.post("/multiclub/solicitud/{id_solicitud}/retirar", tags=["Multiclub"])
+async def retirar_solicitud_participacion(id_solicitud: int, id_equipo: int, db: AsyncSession = Depends(get_db)):
+    """Permite al equipo iniciador retirar una SolicitudParticipacion propia
+    mientras siga PENDIENTE — antes no había forma de deshacer un envío por
+    error antes de que la directiva la resolviera."""
+    solicitud = await db.get(SolicitudParticipacion, id_solicitud)
+    if not solicitud or solicitud.id_equipo_iniciador != id_equipo:
+        raise HTTPException(status_code=404, detail="Solicitud no encontrada")
+    if solicitud.estado != "PENDIENTE":
+        raise HTTPException(status_code=400, detail="Esa solicitud ya no está pendiente")
+    solicitud.estado = "CANCELADA"
+    await db.commit()
+    return {"status": "ok"}
+
+
+def _aplicar_transferencia_interna(jugador: Jugador, vendedor: Equipo, comprador: Equipo, fecha: date, monto: int) -> None:
+    """Pase definitivo a precio de familia entre clubes afiliados — mismo
+    criterio de contrato nuevo que cualquier transferencia normal, sin
+    negociación (ver /multiclub/mover-jugador)."""
+    jugador.id_equipo = comprador.id_equipo
+    jugador.salario = salario_esperado(jugador.valor_mercado, jugador.edad)
+    jugador.fecha_fin_contrato = fecha + timedelta(days=365 * 3)
+    jugador.rol = "RESERVA"
+    jugador.id_equipo_dueno = None
+    jugador.fin_cesion = None
+    jugador.opcion_compra = None
+    vendedor.presupuesto_fichajes += monto
+    comprador.presupuesto_fichajes -= monto
+    vendedor.presupuesto_salarios = tope_salarial(vendedor.presupuesto_fichajes)
+    comprador.presupuesto_salarios = tope_salarial(comprador.presupuesto_fichajes)
+
+
+@app.post("/multiclub/mover-jugador", tags=["Multiclub"])
+async def mover_jugador_afiliado(datos: MoverJugadorIn, db: AsyncSession = Depends(get_db)):
+    """Pipeline de préstamos/transferencias facilitado entre dos clubes con
+    una AfiliacionClub Satélite o Propietario — sin negociación, sin tirada
+    de interés, instantáneo (a diferencia de /fichajes/ceder o una
+    transferencia normal)."""
+    if datos.operacion not in ("PRESTAMO", "TRANSFERENCIA"):
+        raise HTTPException(status_code=400, detail="Operación inválida")
+    jugador = await db.get(Jugador, datos.id_jugador)
+    if not jugador or not jugador.id_equipo:
+        raise HTTPException(status_code=404, detail="Jugador no encontrado")
+    if jugador.id_equipo_dueno is not None:
+        raise HTTPException(status_code=400, detail="Ese jugador ya está cedido a préstamo en otro club")
+    origen = await db.get(Equipo, jugador.id_equipo)
+    destino = await db.get(Equipo, datos.id_equipo_destino)
+    if not destino:
+        raise HTTPException(status_code=404, detail="Club destino no encontrado")
+    if origen.id_equipo == destino.id_equipo:
+        raise HTTPException(status_code=400, detail="El jugador ya está en ese club")
+
+    afiliacion = (await db.execute(
+        select(AfiliacionClub).where(
+            AfiliacionClub.id_partida == origen.id_partida,
+            AfiliacionClub.tipo_relacion.in_(multiclub_engine.TIPOS_CON_PIPELINE),
+            or_(
+                and_(AfiliacionClub.id_equipo_inversor == origen.id_equipo, AfiliacionClub.id_equipo_participado == destino.id_equipo),
+                and_(AfiliacionClub.id_equipo_inversor == destino.id_equipo, AfiliacionClub.id_equipo_participado == origen.id_equipo),
+            ),
+        )
+    )).scalars().first()
+    if not afiliacion:
+        raise HTTPException(status_code=400, detail="Estos clubes no tienen una afiliación (Satélite o Propietario) que habilite el pipeline")
+
+    fecha = await _fecha_actual(db, origen.id_partida)
+
+    if datos.operacion == "PRESTAMO":
+        if datos.duracion_meses not in DURACIONES_CESION_VALIDAS:
+            raise HTTPException(status_code=400, detail="La duración de la cesión debe ser 6 o 12 meses")
+        _aplicar_cesion(jugador, origen, destino, datos.duracion_meses, datos.opcion_compra, fecha)
+        monto = 0
+        mensaje = f"{destino.nombre} se lleva a {jugador.nombre} a préstamo por el pipeline de tu red multiclub."
+    else:
+        monto = multiclub_engine.costo_transferencia_interna(jugador.valor_mercado)
+        _aplicar_transferencia_interna(jugador, origen, destino, fecha, monto)
+        mensaje = f"{destino.nombre} se queda con {jugador.nombre} por transferencia interna (precio de familia: ${money(monto)})."
+
+    if origen.es_usuario:
+        await _crear_mensaje(db, origen.id_equipo, "Secretaría Técnica", f"Movimiento interno: {jugador.nombre}", mensaje, "MERCADO", fecha)
+    if destino.es_usuario:
+        await _crear_mensaje(db, destino.id_equipo, "Secretaría Técnica", f"Movimiento interno: {jugador.nombre}", mensaje, "MERCADO", fecha)
+
+    await db.commit()
+    return {"status": "ok", "mensaje": mensaje, "monto": monto}
+
+
+@app.post("/multiclub/influencia", tags=["Multiclub"])
+async def togglear_influencia(datos: InfluenciaIn, db: AsyncSession = Depends(get_db)):
+    """Habilita/deshabilita que el equipo inversor gestione táctica,
+    entrenamiento y fichajes del club participado (ver clubActivo en el
+    frontend) — solo para afiliaciones Satélite o Propietario."""
+    afiliacion = await db.get(AfiliacionClub, datos.id_afiliacion)
+    if not afiliacion:
+        raise HTTPException(status_code=404, detail="Afiliación no encontrada")
+    if afiliacion.tipo_relacion not in multiclub_engine.TIPOS_CON_PIPELINE:
+        raise HTTPException(status_code=400, detail="Esta afiliación no permite influencia (solo Satélite o Propietario)")
+    afiliacion.influencia_habilitada = datos.habilitada
+    await db.commit()
+    return {"status": "ok", "influencia_habilitada": afiliacion.influencia_habilitada}
 
 
 # ---------- MERCADO: RECOMENDACIONES ESTILO SCOUTING ----------
@@ -3376,7 +3496,7 @@ async def recomendaciones_fichaje(id_equipo: int | None = None, id_partida: int 
         candidatos.append({
             "id_jugador": j.id_jugador, "nombre": j.nombre, "posicion": j.posicion, "posicion_especifica": j.posicion_especifica,
             "edad": j.edad, "overall": j.overall, "potencial": j.potencial,
-            "club": nombre_club or "Agente Libre", "es_libre": j.id_equipo is None,
+            "club": nombre_club or "Agente Libre", "id_equipo": j.id_equipo, "es_libre": j.id_equipo is None,
             "valor_mercado": j.valor_mercado, "salario": j.salario, "asequible": asequible,
             "fecha_fin_contrato": j.fecha_fin_contrato.isoformat() if j.fecha_fin_contrato else None,
             "dias_restantes_contrato": dias_restantes,
@@ -3618,6 +3738,18 @@ async def ofrecer_jugador(datos: OfrecerJugadorIn, db: AsyncSession = Depends(ge
 DURACIONES_CESION_VALIDAS = {6: 182, 12: 365}
 
 
+def _aplicar_cesion(jugador: Jugador, dueno: Equipo, destino: Equipo, duracion_meses: int, opcion_compra: int | None, fecha: date) -> None:
+    """Setea los campos de una cesión aceptada — usado tanto por el camino
+    normal (/fichajes/ceder, después de ganar la tirada de interés) como
+    por el pipeline facilitado entre clubes afiliados (sin tirada, ver
+    /multiclub/mover-jugador)."""
+    jugador.id_equipo_dueno = dueno.id_equipo
+    jugador.id_equipo = destino.id_equipo
+    jugador.fin_cesion = fecha + timedelta(days=DURACIONES_CESION_VALIDAS[duracion_meses])
+    jugador.opcion_compra = opcion_compra
+    jugador.rol = "RESERVA"
+
+
 @app.post("/fichajes/ceder", tags=["Transferencias"])
 async def ceder_jugador(datos: CederJugadorIn, db: AsyncSession = Depends(get_db)):
     """El usuario ofrece un jugador propio a préstamo (6 o 12 meses, con
@@ -3686,11 +3818,7 @@ async def ceder_jugador(datos: CederJugadorIn, db: AsyncSession = Depends(get_db
             "mensaje": f"Ningún club se mostró interesado en llevarse a {jugador.nombre} a préstamo por ahora.",
         }
 
-    jugador.id_equipo_dueno = dueno.id_equipo
-    jugador.id_equipo = club_aceptante.id_equipo
-    jugador.fin_cesion = fecha + timedelta(days=DURACIONES_CESION_VALIDAS[datos.duracion_meses])
-    jugador.opcion_compra = datos.opcion_compra
-    jugador.rol = "RESERVA"
+    _aplicar_cesion(jugador, dueno, club_aceptante, datos.duracion_meses, datos.opcion_compra, fecha)
 
     texto_opcion = f" con opción de compra por ${money(datos.opcion_compra)}" if datos.opcion_compra else ""
     await _crear_mensaje(

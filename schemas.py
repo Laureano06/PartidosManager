@@ -118,6 +118,19 @@ class OfertaParticipacionIn(BaseModel):
     porcentaje: int
 
 
+class MoverJugadorIn(BaseModel):
+    id_jugador: int
+    id_equipo_destino: int
+    operacion: str  # PRESTAMO | TRANSFERENCIA
+    duracion_meses: int | None = None  # requerido si operacion == PRESTAMO
+    opcion_compra: int | None = None
+
+
+class InfluenciaIn(BaseModel):
+    id_afiliacion: int
+    habilitada: bool
+
+
 class OfertaIn(BaseModel):
     id_jugador: int
     id_equipo_comprador: int

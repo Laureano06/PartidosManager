@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 
 const NOMBRE_TIPO = { PROPIETARIO: 'Propietario', SATELITE: 'Club Satélite', MINORITARIO: 'Inversión Minoritaria', MARCA: 'Red de Marca' };
 const NOMBRE_ROL = { PARTICIPADO: 'te controla', INVERSOR: 'controlás vos', MARCA: 'comparten identidad' };
@@ -23,7 +24,7 @@ function PanelModelos() {
     <div className="bg-[#121e36] border border-slate-800 rounded-2xl p-6">
       <button onClick={() => setAbierto((v) => !v)} className="w-full flex items-center justify-between text-left">
         <h2 className="text-xs font-bold text-sky-400 uppercase tracking-wider">¿Qué son los modelos multiclub?</h2>
-        <span className="text-slate-500 text-xs">{abierto ? 'Ocultar ▲' : 'Ver ▼'}</span>
+        <span className="text-slate-400 text-xs">{abierto ? 'Ocultar ▲' : 'Ver ▼'}</span>
       </button>
       {abierto && (
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-4">
@@ -31,10 +32,10 @@ function PanelModelos() {
             <div key={m.tipo} className="bg-[#0b1326] border border-slate-800 rounded-xl p-3 text-xs space-y-1">
               <div className="flex justify-between items-baseline">
                 <span className="text-white font-bold">{NOMBRE_TIPO[m.tipo]}</span>
-                <span className="text-slate-500">{m.rango}</span>
+                <span className="text-slate-400">{m.rango}</span>
               </div>
               <p className="text-slate-400">{m.desc}</p>
-              <p className="text-slate-600 italic">Ej: {m.ejemplo}</p>
+              <p className="text-slate-400 italic">Ej: {m.ejemplo}</p>
             </div>
           ))}
         </div>
@@ -64,11 +65,11 @@ function TarjetaPosicion({ multiclub }) {
       )}
       {bono && (posicion || redMarca) && (
         <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 text-xs pt-2 border-t border-slate-800">
-          <div><p className="text-slate-500">Entrenamiento</p><p className="text-sky-400 font-bold">+{Math.round(bono.bono_centro * 100)}%</p></div>
-          <div><p className="text-slate-500">Riesgo de lesión</p><p className="text-sky-400 font-bold">-{Math.round((1 - bono.factor_medico) * 100)}%</p></div>
-          <div><p className="text-slate-500">Scouting</p><p className="text-sky-400 font-bold">+{bono.bono_analitica}</p></div>
-          <div><p className="text-slate-500">Academia</p><p className="text-sky-400 font-bold">+{Math.round(bono.bono_instalaciones_juveniles * 100)}%</p></div>
-          <div><p className="text-slate-500">Captación</p><p className="text-sky-400 font-bold">+{bono.bono_captacion_juvenil}</p></div>
+          <div><p className="text-slate-400">Entrenamiento</p><p className="text-sky-400 font-bold">+{Math.round(bono.bono_centro * 100)}%</p></div>
+          <div><p className="text-slate-400">Riesgo de lesión</p><p className="text-sky-400 font-bold">-{Math.round((1 - bono.factor_medico) * 100)}%</p></div>
+          <div><p className="text-slate-400">Scouting</p><p className="text-sky-400 font-bold">+{bono.bono_analitica}</p></div>
+          <div><p className="text-slate-400">Academia</p><p className="text-sky-400 font-bold">+{Math.round(bono.bono_instalaciones_juveniles * 100)}%</p></div>
+          <div><p className="text-slate-400">Captación</p><p className="text-sky-400 font-bold">+{bono.bono_captacion_juvenil}</p></div>
         </div>
       )}
     </div>
@@ -97,14 +98,21 @@ function FormularioOperacion({ idEquipo, contraparte, operacion, onCerrar, onCon
   useEffect(() => {
     if (!porcentaje || porcentaje <= 0 || excedido) { setCotizacion(null); return; }
     setCargando(true);
-    const params = new URLSearchParams({
-      id_equipo_iniciador: idEquipo, id_equipo_contraparte: contraparte.id_equipo, operacion, porcentaje: String(porcentaje),
-    });
-    fetch(`${API_URL}/multiclub/cotizar?${params.toString()}`)
-      .then((r) => r.json())
-      .then(setCotizacion)
-      .catch(() => setCotizacion(null))
-      .finally(() => setCargando(false));
+    // Debounce + guard de respuesta obsoleta: sin esto, tipear rápido dispara
+    // una cotización por tecla y una respuesta fuera de orden podía dejar en
+    // pantalla el precio de un porcentaje que ya no es el que está escrito.
+    let vigente = true;
+    const idTimeout = setTimeout(() => {
+      const params = new URLSearchParams({
+        id_equipo_iniciador: idEquipo, id_equipo_contraparte: contraparte.id_equipo, operacion, porcentaje: String(porcentaje),
+      });
+      fetch(`${API_URL}/multiclub/cotizar?${params.toString()}`)
+        .then((r) => r.json())
+        .then((data) => { if (vigente) setCotizacion(data); })
+        .catch(() => { if (vigente) setCotizacion(null); })
+        .finally(() => { if (vigente) setCargando(false); });
+    }, 350);
+    return () => { vigente = false; clearTimeout(idTimeout); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [porcentaje, idEquipo, contraparte.id_equipo, operacion, API_URL]);
 
@@ -151,7 +159,7 @@ function FormularioOperacion({ idEquipo, contraparte, operacion, onCerrar, onCon
           )}
         </div>
         <div className="bg-[#0b1326] border border-slate-800 rounded-xl p-3 text-xs space-y-1">
-          {cargando && <p className="text-slate-500">Cotizando...</p>}
+          {cargando && <p className="text-slate-400">Cotizando...</p>}
           {!cargando && !excedido && cotizacion && (
             <>
               <p className="text-slate-400">Valor estimado del club: <span className="text-slate-200 font-bold">${cotizacion.valor_club.toLocaleString('es-AR')}</span></p>
@@ -193,6 +201,19 @@ export default function MulticlubPage({ API_URL, idEquipoUsuario }) {
   const [cargando, setCargando] = useState(true);
   const [busqueda, setBusqueda] = useState('');
   const [operacionAbierta, setOperacionAbierta] = useState(null); // { contraparte, operacion, tuPorcentaje }
+  const [retirando, setRetirando] = useState(null); // id_solicitud en curso de retiro
+
+  const retirarSolicitud = async (idSolicitud) => {
+    setRetirando(idSolicitud);
+    try {
+      const r = await fetch(`${API_URL}/multiclub/solicitud/${idSolicitud}/retirar?id_equipo=${idEquipoUsuario}`, { method: 'POST' });
+      if (r.ok) cargar();
+    } catch (e) {
+      console.error('Error retirando solicitud:', e);
+    } finally {
+      setRetirando(null);
+    }
+  };
 
   const cargar = useCallback(() => {
     if (!idEquipoUsuario) return;
@@ -222,13 +243,13 @@ export default function MulticlubPage({ API_URL, idEquipoUsuario }) {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <div className="bg-[#121e36] border border-slate-800 rounded-2xl p-6">
           <h2 className="text-xs font-bold text-sky-400 uppercase tracking-wider mb-3">Tus participaciones</h2>
-          {multiclub.tus_participaciones.length === 0 && <p className="text-xs text-slate-500">No tenés participación en otros clubes.</p>}
+          {multiclub.tus_participaciones.length === 0 && <p className="text-xs text-slate-400">No tenés participación en otros clubes.</p>}
           <div className="space-y-2">
             {multiclub.tus_participaciones.map((p) => (
               <div key={p.id_equipo} className="flex items-center justify-between bg-[#0b1326] border border-slate-800 rounded-xl p-3 text-xs">
                 <div>
-                  <p className="text-slate-200 font-bold">{p.nombre}</p>
-                  <p className="text-slate-500">{p.porcentaje}% · {NOMBRE_TIPO[p.tipo_relacion] || p.tipo_relacion}</p>
+                  <Link to={`/club/${p.id_equipo}`} className="text-slate-200 font-bold hover:text-sky-400 hover:underline">{p.nombre}</Link>
+                  <p className="text-slate-400">{p.porcentaje}% · {NOMBRE_TIPO[p.tipo_relacion] || p.tipo_relacion}</p>
                 </div>
                 <button
                   onClick={() => setOperacionAbierta({ contraparte: p, operacion: 'VENDER', tuPorcentaje: p.porcentaje })}
@@ -243,12 +264,12 @@ export default function MulticlubPage({ API_URL, idEquipoUsuario }) {
 
         <div className="bg-[#121e36] border border-slate-800 rounded-2xl p-6">
           <h2 className="text-xs font-bold text-sky-400 uppercase tracking-wider mb-3">Participaciones sobre tu club</h2>
-          {multiclub.participaciones_sobre_tu_club.length === 0 && <p className="text-xs text-slate-500">Ningún club tiene participación en el tuyo.</p>}
+          {multiclub.participaciones_sobre_tu_club.length === 0 && <p className="text-xs text-slate-400">Ningún club tiene participación en el tuyo.</p>}
           <div className="space-y-2">
             {multiclub.participaciones_sobre_tu_club.map((p) => (
               <div key={p.id_equipo} className="bg-[#0b1326] border border-slate-800 rounded-xl p-3 text-xs">
-                <p className="text-slate-200 font-bold">{p.nombre}</p>
-                <p className="text-slate-500">{p.porcentaje}% · {NOMBRE_TIPO[p.tipo_relacion] || p.tipo_relacion}</p>
+                <Link to={`/club/${p.id_equipo}`} className="text-slate-200 font-bold hover:text-sky-400 hover:underline">{p.nombre}</Link>
+                <p className="text-slate-400">{p.porcentaje}% · {NOMBRE_TIPO[p.tipo_relacion] || p.tipo_relacion}</p>
               </div>
             ))}
           </div>
@@ -262,12 +283,24 @@ export default function MulticlubPage({ API_URL, idEquipoUsuario }) {
             {multiclub.solicitudes_pendientes.map((s) => {
               const club = mercado.clubes.find((c) => c.id_equipo === s.id_equipo_contraparte);
               return (
-                <div key={s.id_solicitud} className="bg-[#0b1326] border border-slate-800 rounded-xl p-3 text-xs flex justify-between items-center">
+                <div key={s.id_solicitud} className="bg-[#0b1326] border border-slate-800 rounded-xl p-3 text-xs flex justify-between items-center gap-3">
                   <div>
                     <p className="text-slate-200 font-bold">{s.operacion === 'COMPRAR' ? 'Compra' : 'Venta'} de {s.porcentaje}% — {club?.nombre || '?'}</p>
-                    <p className="text-slate-500">${s.monto.toLocaleString('es-AR')} · fase: {s.fase === 'DIRECTIVA_PROPIA' ? 'tu directiva' : 'directiva del club objetivo'}</p>
+                    <p className="text-slate-400">${s.monto.toLocaleString('es-AR')} · fase: {s.fase === 'DIRECTIVA_PROPIA' ? 'tu directiva' : 'directiva del club objetivo'}</p>
                   </div>
-                  <span className="text-slate-500">ETA {new Date(`${s.fecha_resolucion}T00:00:00`).toLocaleDateString('es-AR')}</span>
+                  <div className="text-right shrink-0 space-y-1">
+                    <p className="text-slate-400">ETA {new Date(`${s.fecha_resolucion}T00:00:00`).toLocaleDateString('es-AR')}</p>
+                    {/* Solo mientras está en la fase de tu propia directiva: una vez que
+                        pasa a evaluarse en el club objetivo ya no tiene sentido "retirarla"
+                        de tu lado — retirarSolicitud igual la valida en el backend. */}
+                    <button
+                      onClick={() => retirarSolicitud(s.id_solicitud)}
+                      disabled={retirando === s.id_solicitud}
+                      className="text-[10px] text-rose-300 hover:text-rose-200 disabled:opacity-50 underline"
+                    >
+                      {retirando === s.id_solicitud ? 'Retirando...' : 'Retirar solicitud'}
+                    </button>
+                  </div>
                 </div>
               );
             })}
@@ -285,8 +318,8 @@ export default function MulticlubPage({ API_URL, idEquipoUsuario }) {
           {clubesFiltrados.slice(0, 60).map((c) => (
             <div key={c.id_equipo} className="flex items-center justify-between bg-[#0b1326] border border-slate-800 rounded-lg px-3 py-2 text-xs">
               <div>
-                <p className="text-slate-200 font-bold">{c.nombre}</p>
-                <p className="text-slate-500">Reputación {c.reputacion} · Valor ${c.valor_club.toLocaleString('es-AR')}{c.tu_porcentaje > 0 && ` · Tenés ${c.tu_porcentaje}%`}</p>
+                <Link to={`/club/${c.id_equipo}`} className="text-slate-200 font-bold hover:text-sky-400 hover:underline">{c.nombre}</Link>
+                <p className="text-slate-400">Reputación {c.reputacion} · Valor ${c.valor_club.toLocaleString('es-AR')}{c.tu_porcentaje > 0 && ` · Tenés ${c.tu_porcentaje}%`}</p>
               </div>
               <button
                 onClick={() => setOperacionAbierta({ contraparte: c, operacion: 'COMPRAR', tuPorcentaje: c.tu_porcentaje })}

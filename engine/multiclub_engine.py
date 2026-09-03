@@ -37,6 +37,20 @@ GRUPOS_MARCA_CURADOS = [
 UMBRAL_SATELITE = 15
 UMBRAL_PROPIETARIO = 35
 
+# Tipos de relación con pipeline de préstamos/transferencias facilitado y
+# opción de influencia (ver /multiclub/mover-jugador y /multiclub/influencia
+# en main.py) — MINORITARIO es solo inversión, no da ese acceso.
+TIPOS_CON_PIPELINE = {"SATELITE", "PROPIETARIO"}
+
+# Precio "de familia" para una transferencia interna entre clubes afiliados
+# (con pipeline habilitado) — una fracción del valor de mercado real, no el
+# precio completo, reflejando que es un movimiento dentro del propio grupo.
+FACTOR_PRECIO_FAMILIA = 0.5
+
+
+def costo_transferencia_interna(valor_mercado: int) -> int:
+    return round(valor_mercado * FACTOR_PRECIO_FAMILIA / 1000) * 1000
+
 
 def tipo_relacion_por_porcentaje(porcentaje: int) -> str | None:
     """Los 3 modelos comprables son en realidad un único mecanismo continuo

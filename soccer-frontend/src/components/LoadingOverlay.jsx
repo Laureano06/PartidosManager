@@ -11,10 +11,14 @@ export default function LoadingOverlay({ show, mensaje = 'Procesando...' }) {
       <div className="flex flex-col items-center gap-5">
         <div className="relative w-24 h-24 flex items-center justify-center">
           <div className="absolute inset-0 rounded-full border-4 border-slate-800" />
-          <div className="absolute inset-0 rounded-full border-4 border-transparent border-t-sky-400 border-r-sky-400 animate-spin" />
+          <div className="absolute inset-0 rounded-full border-4 border-transparent border-t-sky-400 border-r-sky-400 animate-spin motion-reduce:animate-none" />
           <img src="/iconoPARTIDOS.png" alt="" className="w-12 h-12 rounded-full object-cover" />
         </div>
-        <p className="text-sm font-bold text-slate-200 animate-pulse">{mensaje}</p>
+        {/* El anillo se queda quieto (pero sigue visible su segmento celeste) con
+            prefers-reduced-motion: la app queda bloqueada por completo mientras
+            esto está en pantalla, así que necesita una señal de "en curso" que
+            no dependa de movimiento continuo para alguien sensible al motion. */}
+        <p className="text-sm font-bold text-slate-200 animate-pulse motion-reduce:animate-none">{mensaje}</p>
       </div>
     </div>
   );

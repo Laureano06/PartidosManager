@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 import PlayerDetailModal from '../components/PlayerDetailModal';
+import CeldaAccionFichaje from '../components/CeldaAccionFichaje';
 import ContractModal from '../components/ContractModal';
 import NegociacionFichajeModal from '../components/NegociacionFichajeModal';
 import ConfirmarReclutamientoModal from '../components/ConfirmarReclutamientoModal';
@@ -55,30 +56,6 @@ function ThOrdenable({ label, colKey, sortKey, sortDir, onClick, className = '' 
       {label}
       {sortKey === colKey && <span className="ml-1">{sortDir === 'asc' ? '▲' : '▼'}</span>}
     </th>
-  );
-}
-
-// Si ya hay un pase ACORDADO (ACEPTADA, pendiente de hacerse efectivo) para
-// este jugador con tu club, o ya firmó un PRECONTRATO con vos (se incorpora
-// libre cuando termine su contrato actual — eso vive en id_equipo_precontrato,
-// no en OfertaFichaje), no tiene sentido seguir mostrando el botón de
-// negociar — se muestra cuándo se va a incorporar en su lugar.
-function CeldaAccion({ j, idsComprando, onAccion, label, idEquipoUsuario }) {
-  const acordado = idsComprando.get(j.id_jugador);
-  if (acordado) {
-    return <span className="text-[10px] font-bold text-emerald-400">Se unirá a tu club {acordado.texto_incorporacion}</span>;
-  }
-  if (j.id_equipo_precontrato && j.id_equipo_precontrato === idEquipoUsuario) {
-    const fecha = j.fecha_fin_contrato ? new Date(`${j.fecha_fin_contrato}T00:00:00`).toLocaleDateString('es-AR') : '?';
-    return <span className="text-[10px] font-bold text-emerald-400">Se unirá a tu club libre el {fecha}</span>;
-  }
-  if (j.id_equipo_precontrato && j.id_equipo_precontrato !== idEquipoUsuario) {
-    return <span className="text-[10px] text-slate-500">Ya firmó precontrato con otro club</span>;
-  }
-  return (
-    <button onClick={() => onAccion(j)} className="bg-sky-500 hover:bg-sky-400 text-slate-950 font-bold px-3 py-1 rounded text-xs">
-      {label}
-    </button>
   );
 }
 
@@ -179,6 +156,13 @@ export default function TransferenciasPage({ API_URL, idEquipoUsuario, idPartida
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [idEquipoUsuario]);
 
+  // Vender un jugador es una decisión de alto impacto (lo saca de tu plantel
+  // de forma efectivamente irreversible) — a diferencia de "Rechazar", que
+  // no tiene costo, "Aceptar" pasa por una confirmación explícita en vez de
+  // ejecutarse directo al click.
+  const [ofertaAConfirmar, setOfertaAConfirmar] = useState(null);
+  const [confirmandoOferta, setConfirmandoOferta] = useState(false);
+
   const responderOfertaRecibida = async (idOferta, aceptar) => {
     try {
       await fetch(`${API_URL}/fichajes/responder`, {
@@ -191,6 +175,14 @@ export default function TransferenciasPage({ API_URL, idEquipoUsuario, idPartida
     } catch (error) {
       console.error('Error respondiendo la oferta:', error);
     }
+  };
+
+  const confirmarVenta = async () => {
+    if (!ofertaAConfirmar) return;
+    setConfirmandoOferta(true);
+    await responderOfertaRecibida(ofertaAConfirmar.id_oferta, true);
+    setConfirmandoOferta(false);
+    setOfertaAConfirmar(null);
   };
 
   // --- método 1: club -> jugador ---
@@ -313,8 +305,9 @@ export default function TransferenciasPage({ API_URL, idEquipoUsuario, idPartida
     <div className="space-y-6">
       <div className="bg-[#121e36] border border-slate-800 rounded-2xl p-5 flex flex-wrap gap-4 items-end">
         <div>
-          <label className="text-xs text-slate-400 block mb-1">Liga</label>
+          <label htmlFor="filtro-liga" className="text-xs text-slate-400 block mb-1">Liga</label>
           <select
+            id="filtro-liga"
             value={idLiga}
             onChange={(e) => { setIdLiga(e.target.value); setClubSeleccionado(null); setJugadoresClub([]); }}
             className="bg-[#0b1326] border border-slate-700 p-2 rounded-lg text-white text-xs"
@@ -364,32 +357,32 @@ export default function TransferenciasPage({ API_URL, idEquipoUsuario, idPartida
             <button onClick={() => irABuscar(recomendaciones?.posicion_prioritaria)} className="text-left bg-[#121e36] border border-slate-800 hover:border-sky-500/50 rounded-2xl p-4 transition">
               <p className="text-xs text-slate-400 uppercase tracking-wider">Posición prioritaria</p>
               <p className="text-2xl font-black text-white mt-1">{recomendaciones?.posicion_prioritaria || '—'}</p>
-              <p className="text-[11px] text-slate-500 mt-1">Tocá para buscar en el mercado</p>
+              <p className="text-[11px] text-slate-400 mt-1">Tocá para buscar en el mercado</p>
             </button>
             <button onClick={() => setTab('negociacion')} className="text-left bg-[#121e36] border border-slate-800 hover:border-sky-500/50 rounded-2xl p-4 transition">
               <p className="text-xs text-slate-400 uppercase tracking-wider">Ofertas recibidas</p>
               <p className="text-2xl font-black text-white mt-1">{negociaciones.recibidas.length}</p>
-              <p className="text-[11px] text-slate-500 mt-1">Esperando tu respuesta</p>
+              <p className="text-[11px] text-slate-400 mt-1">Esperando tu respuesta</p>
             </button>
             <button onClick={() => setTab('negociacion')} className="text-left bg-[#121e36] border border-slate-800 hover:border-sky-500/50 rounded-2xl p-4 transition">
               <p className="text-xs text-slate-400 uppercase tracking-wider">Compras / Ventas acordadas</p>
               <p className="text-2xl font-black text-white mt-1">
                 {negociaciones.comprando.length + negociaciones.vendiendo.length + negociaciones.precontratos_entrantes.length + negociaciones.precontratos_salientes.length}
               </p>
-              <p className="text-[11px] text-slate-500 mt-1">Pendientes de la próxima ventana</p>
+              <p className="text-[11px] text-slate-400 mt-1">Pendientes de la próxima ventana</p>
             </button>
             <button onClick={() => setTab('preseleccion')} className="text-left bg-[#121e36] border border-slate-800 hover:border-sky-500/50 rounded-2xl p-4 transition">
               <p className="text-xs text-slate-400 uppercase tracking-wider">Preseleccionados</p>
               <p className="text-2xl font-black text-white mt-1">{preseleccionados.length}</p>
-              <p className="text-[11px] text-slate-500 mt-1">Tu lista de seguimiento</p>
+              <p className="text-[11px] text-slate-400 mt-1">Tu lista de seguimiento</p>
             </button>
           </div>
 
           {recomendaciones && (
-            <div className="grid grid-cols-4 gap-2">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
               {Object.entries(recomendaciones.promedios_por_posicion).map(([pos, valor]) => (
                 <div key={pos} className="bg-[#0b1326] border border-slate-800 rounded-xl p-3 text-center">
-                  <p className="text-[10px] text-slate-500">Nivel promedio {pos}</p>
+                  <p className="text-[10px] text-slate-400">Nivel promedio {pos}</p>
                   <p className="text-sm font-bold text-white">{valor || '—'}</p>
                 </div>
               ))}
@@ -401,9 +394,9 @@ export default function TransferenciasPage({ API_URL, idEquipoUsuario, idPartida
               <h2 className="text-sm font-bold text-white">Recomendaciones para tu equipo</h2>
               <button onClick={() => irABuscar()} className="text-xs text-sky-400 hover:underline shrink-0">Ver todo en el buscador →</button>
             </div>
-            <p className="text-[11px] text-slate-500 mb-4">Jugadores del mercado que mejoran tus posiciones más flojas. Tocá uno para buscarlo y negociar.</p>
+            <p className="text-[11px] text-slate-400 mb-4">Jugadores del mercado que mejoran tus posiciones más flojas. Tocá uno para buscarlo y negociar.</p>
             {!recomendaciones || recomendaciones.recomendaciones.length === 0 ? (
-              <p className="text-xs text-slate-500">No hay recomendaciones disponibles por ahora.</p>
+              <p className="text-xs text-slate-400">No hay recomendaciones disponibles por ahora.</p>
             ) : (
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                 {recomendaciones.recomendaciones.slice(0, 6).map((j) => (
@@ -414,7 +407,7 @@ export default function TransferenciasPage({ API_URL, idEquipoUsuario, idPartida
                   >
                     <div className="min-w-0">
                       <p className="font-bold text-slate-200 truncate">{j.nombre}</p>
-                      <p className="text-slate-500 truncate">{j.club} · {j.posicion_especifica || j.posicion} · {j.edad} años</p>
+                      <p className="text-slate-400 truncate">{j.club} · {j.posicion_especifica || j.posicion} · {j.edad} años</p>
                     </div>
                     <div className="text-right shrink-0">
                       <p className="font-bold text-white">{formatOverall(j)} <span className="text-amber-300">/ {formatPotencial(j)}</span></p>
@@ -429,13 +422,13 @@ export default function TransferenciasPage({ API_URL, idEquipoUsuario, idPartida
           {recomendaciones && recomendaciones.oportunidades_salida.length > 0 && (
             <div className="bg-[#121e36] border border-slate-800 rounded-2xl p-6">
               <h2 className="text-sm font-bold text-white mb-1">Jugadores con salida recomendada</h2>
-              <p className="text-[11px] text-slate-500 mb-4">Rinden por debajo del promedio del equipo o suman poco rodaje.</p>
+              <p className="text-[11px] text-slate-400 mb-4">Rinden por debajo del promedio del equipo o suman poco rodaje.</p>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                 {recomendaciones.oportunidades_salida.slice(0, 4).map((j) => (
                   <div key={j.id_jugador} className="flex items-center justify-between gap-3 bg-[#0b1326] border border-slate-800 rounded-xl p-3 text-xs">
                     <div className="min-w-0">
                       <p className="font-bold text-slate-200 truncate">{j.nombre}</p>
-                      <p className="text-slate-500">{j.posicion_especifica || j.posicion} · {j.edad} años · {j.rol}</p>
+                      <p className="text-slate-400">{j.posicion_especifica || j.posicion} · {j.edad} años · {j.rol}</p>
                     </div>
                     <p className="font-bold text-sky-400 shrink-0">${j.valor_mercado.toLocaleString('es-AR')}</p>
                   </div>
@@ -449,7 +442,7 @@ export default function TransferenciasPage({ API_URL, idEquipoUsuario, idPartida
       {tab === 'clubes' && !clubSeleccionado && (
         <div className="bg-[#121e36] border border-slate-800 rounded-2xl p-6">
           <h2 className="text-sm font-bold text-white mb-1">Explorar por club</h2>
-          <p className="text-[11px] text-slate-500 mb-4">Elegí un club para ver su plantel completo.</p>
+          <p className="text-[11px] text-slate-400 mb-4">Elegí un club para ver su plantel completo.</p>
           {cargandoClubes ? (
             <p className="text-xs text-slate-400">Cargando clubes...</p>
           ) : (
@@ -474,12 +467,16 @@ export default function TransferenciasPage({ API_URL, idEquipoUsuario, idPartida
         <div className="bg-[#121e36] border border-slate-800 rounded-2xl p-6">
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-sm font-bold text-white">Plantel de {clubSeleccionado.nombre}</h2>
-            <button onClick={() => setClubSeleccionado(null)} className="text-xs text-sky-400 hover:underline">← Volver a clubes</button>
+            <div className="flex items-center gap-3">
+              <Link to={`/club/${clubSeleccionado.id_equipo}`} className="text-xs text-sky-400 hover:underline">Ver panel del club →</Link>
+              <button onClick={() => setClubSeleccionado(null)} className="text-xs text-sky-400 hover:underline">← Volver a clubes</button>
+            </div>
           </div>
           <div className="flex flex-wrap gap-4 items-end mb-4">
             <div>
-              <label className="text-xs text-slate-400 block mb-1">Posición</label>
+              <label htmlFor="filtro-club-pos" className="text-xs text-slate-400 block mb-1">Posición</label>
               <select
+                id="filtro-club-pos"
                 value={filtroClubPos}
                 onChange={(e) => { setFiltroClubPos(e.target.value); setFiltroClubPosEspecifica(''); }}
                 className="bg-[#0b1326] border border-slate-700 p-2 rounded-lg text-white text-xs"
@@ -493,8 +490,9 @@ export default function TransferenciasPage({ API_URL, idEquipoUsuario, idPartida
             </div>
             {filtroClubPos && (
               <div>
-                <label className="text-xs text-slate-400 block mb-1">Específica</label>
+                <label htmlFor="filtro-club-pos-especifica" className="text-xs text-slate-400 block mb-1">Específica</label>
                 <select
+                  id="filtro-club-pos-especifica"
                   value={filtroClubPosEspecifica}
                   onChange={(e) => setFiltroClubPosEspecifica(e.target.value)}
                   className="bg-[#0b1326] border border-slate-700 p-2 rounded-lg text-white text-xs"
@@ -510,6 +508,7 @@ export default function TransferenciasPage({ API_URL, idEquipoUsuario, idPartida
           {cargandoPlantel ? (
             <p className="text-xs text-slate-400">Cargando plantel...</p>
           ) : (
+            <div className="overflow-x-auto">
             <table className="w-full text-left text-xs">
               <thead>
                 <tr className="border-b border-slate-800 text-slate-400">
@@ -529,22 +528,32 @@ export default function TransferenciasPage({ API_URL, idEquipoUsuario, idPartida
                   return (
                     <tr key={j.id_jugador} className="border-b border-slate-800/40 hover:bg-[#0b1326]">
                       <td className="p-3">
-                        <button onClick={() => toggleShortlist(jc)} className={`text-base ${estaPreseleccionado(j.id_jugador) ? 'text-amber-400' : 'text-slate-600 hover:text-slate-400'}`}>★</button>
+                        <button onClick={() => toggleShortlist(jc)} aria-label={estaPreseleccionado(j.id_jugador) ? `Quitar a ${j.nombre} de preseleccionados` : `Agregar a ${j.nombre} a preseleccionados`} aria-pressed={estaPreseleccionado(j.id_jugador)} className={`text-base ${estaPreseleccionado(j.id_jugador) ? 'text-amber-400' : 'text-slate-500 hover:text-slate-300'}`}>★</button>
                       </td>
-                      <td className="p-3 font-bold text-slate-200 cursor-pointer" onClick={() => setJugadorDetalle(jc)}>{j.nombre}</td>
+                      <td
+                        className="p-3 font-bold text-slate-200 cursor-pointer focus-visible:outline focus-visible:outline-sky-500"
+                        onClick={() => setJugadorDetalle(jc)}
+                        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setJugadorDetalle(jc); } }}
+                        role="button"
+                        tabIndex={0}
+                        aria-label={`Ver ficha de ${j.nombre}`}
+                      >
+                        {j.nombre}
+                      </td>
                       <td className="p-3 text-sky-400">{posicionLabel(j)}</td>
                       <td className="p-3 text-slate-300">{j.edad}</td>
                       <td className="p-3 font-bold text-white">{formatOverall(j)}</td>
                       <td className="p-3 font-bold text-sky-400">${j.valor_mercado.toLocaleString('es-AR')}</td>
                       <td className="p-3"><BadgeContrato j={jc} /></td>
                       <td className="p-3">
-                        <CeldaAccion j={jc} idsComprando={idsComprando} onAccion={abrirAccion} label={labelAccion(jc)} idEquipoUsuario={idEquipoUsuario} />
+                        <CeldaAccionFichaje j={jc} idsComprando={idsComprando} onAccion={abrirAccion} label={labelAccion(jc)} idEquipoUsuario={idEquipoUsuario} />
                       </td>
                     </tr>
                   );
                 })}
               </tbody>
             </table>
+            </div>
           )}
         </div>
       )}
@@ -553,8 +562,9 @@ export default function TransferenciasPage({ API_URL, idEquipoUsuario, idPartida
         <>
           <div className="bg-[#121e36] border border-slate-800 rounded-2xl p-5 flex flex-wrap gap-3 items-end">
             <div>
-              <label className="text-xs text-slate-400 block mb-1">Nombre</label>
+              <label htmlFor="filtro-nombre" className="text-xs text-slate-400 block mb-1">Nombre</label>
               <input
+                id="filtro-nombre"
                 type="text"
                 value={filtros.nombre}
                 onChange={(e) => setFiltros((f) => ({ ...f, nombre: e.target.value }))}
@@ -564,8 +574,9 @@ export default function TransferenciasPage({ API_URL, idEquipoUsuario, idPartida
               />
             </div>
             <div>
-              <label className="text-xs text-slate-400 block mb-1">Club</label>
+              <label htmlFor="filtro-club-nombre" className="text-xs text-slate-400 block mb-1">Club</label>
               <input
+                id="filtro-club-nombre"
                 type="text"
                 value={filtros.club}
                 onChange={(e) => setFiltros((f) => ({ ...f, club: e.target.value }))}
@@ -575,8 +586,9 @@ export default function TransferenciasPage({ API_URL, idEquipoUsuario, idPartida
               />
             </div>
             <div>
-              <label className="text-xs text-slate-400 block mb-1">Categoría</label>
+              <label htmlFor="filtro-categoria" className="text-xs text-slate-400 block mb-1">Categoría</label>
               <select
+                id="filtro-categoria"
                 value={filtros.categoria}
                 onChange={(e) => setFiltros((f) => ({ ...f, categoria: e.target.value }))}
                 className="bg-[#0b1326] border border-slate-700 p-2 rounded-lg text-white text-xs"
@@ -592,8 +604,9 @@ export default function TransferenciasPage({ API_URL, idEquipoUsuario, idPartida
               )}
             </div>
             <div>
-              <label className="text-xs text-slate-400 block mb-1">Posición</label>
+              <label htmlFor="filtro-buscar-pos" className="text-xs text-slate-400 block mb-1">Posición</label>
               <select
+                id="filtro-buscar-pos"
                 value={filtros.posicion}
                 onChange={(e) => setFiltros((f) => ({ ...f, posicion: e.target.value, posicionEspecifica: '' }))}
                 className="bg-[#0b1326] border border-slate-700 p-2 rounded-lg text-white text-xs"
@@ -607,8 +620,9 @@ export default function TransferenciasPage({ API_URL, idEquipoUsuario, idPartida
             </div>
             {filtros.posicion && (
               <div>
-                <label className="text-xs text-slate-400 block mb-1">Específica</label>
+                <label htmlFor="filtro-buscar-pos-especifica" className="text-xs text-slate-400 block mb-1">Específica</label>
                 <select
+                  id="filtro-buscar-pos-especifica"
                   value={filtros.posicionEspecifica}
                   onChange={(e) => setFiltros((f) => ({ ...f, posicionEspecifica: e.target.value }))}
                   className="bg-[#0b1326] border border-slate-700 p-2 rounded-lg text-white text-xs"
@@ -621,20 +635,20 @@ export default function TransferenciasPage({ API_URL, idEquipoUsuario, idPartida
               </div>
             )}
             <div>
-              <label className="text-xs text-slate-400 block mb-1">Edad mín.</label>
-              <input type="number" value={filtros.edadMin} onChange={(e) => setFiltros((f) => ({ ...f, edadMin: e.target.value }))} className="w-20 bg-[#0b1326] border border-slate-700 p-2 rounded-lg text-white text-xs" />
+              <label htmlFor="filtro-edad-min" className="text-xs text-slate-400 block mb-1">Edad mín.</label>
+              <input id="filtro-edad-min" type="number" min="0" max="99" value={filtros.edadMin} onChange={(e) => setFiltros((f) => ({ ...f, edadMin: e.target.value }))} className="w-20 bg-[#0b1326] border border-slate-700 p-2 rounded-lg text-white text-xs" />
             </div>
             <div>
-              <label className="text-xs text-slate-400 block mb-1">Edad máx.</label>
-              <input type="number" value={filtros.edadMax} onChange={(e) => setFiltros((f) => ({ ...f, edadMax: e.target.value }))} className="w-20 bg-[#0b1326] border border-slate-700 p-2 rounded-lg text-white text-xs" />
+              <label htmlFor="filtro-edad-max" className="text-xs text-slate-400 block mb-1">Edad máx.</label>
+              <input id="filtro-edad-max" type="number" min="0" max="99" value={filtros.edadMax} onChange={(e) => setFiltros((f) => ({ ...f, edadMax: e.target.value }))} className="w-20 bg-[#0b1326] border border-slate-700 p-2 rounded-lg text-white text-xs" />
             </div>
             <div>
-              <label className="text-xs text-slate-400 block mb-1">Overall mín.</label>
-              <input type="number" value={filtros.overallMin} onChange={(e) => setFiltros((f) => ({ ...f, overallMin: e.target.value }))} className="w-20 bg-[#0b1326] border border-slate-700 p-2 rounded-lg text-white text-xs" />
+              <label htmlFor="filtro-overall-min" className="text-xs text-slate-400 block mb-1">Overall mín.</label>
+              <input id="filtro-overall-min" type="number" min="0" max="99" value={filtros.overallMin} onChange={(e) => setFiltros((f) => ({ ...f, overallMin: e.target.value }))} className="w-20 bg-[#0b1326] border border-slate-700 p-2 rounded-lg text-white text-xs" />
             </div>
             <div>
-              <label className="text-xs text-slate-400 block mb-1">Ordenar por</label>
-              <select value={filtros.orden} onChange={(e) => setFiltros((f) => ({ ...f, orden: e.target.value }))} className="bg-[#0b1326] border border-slate-700 p-2 rounded-lg text-white text-xs">
+              <label htmlFor="filtro-orden" className="text-xs text-slate-400 block mb-1">Ordenar por</label>
+              <select id="filtro-orden" value={filtros.orden} onChange={(e) => setFiltros((f) => ({ ...f, orden: e.target.value }))} className="bg-[#0b1326] border border-slate-700 p-2 rounded-lg text-white text-xs">
                 <option value="valor">Valor</option>
                 <option value="overall">Overall</option>
                 <option value="edad">Edad</option>
@@ -658,12 +672,13 @@ export default function TransferenciasPage({ API_URL, idEquipoUsuario, idPartida
             <h2 className="text-sm font-bold text-white mb-4">
               Resultados ({resultadosBusqueda.length}{totalBusqueda > resultadosBusqueda.length ? ` de ${totalBusqueda}` : ''})
               {totalBusqueda > resultadosBusqueda.length && (
-                <span className="text-[11px] font-normal text-slate-500 ml-2">Afiná los filtros para ver más específico</span>
+                <span className="text-[11px] font-normal text-slate-400 ml-2">Afiná los filtros para ver más específico</span>
               )}
             </h2>
             {cargandoBusqueda ? (
               <p className="text-xs text-slate-400">Buscando...</p>
             ) : (
+              <div className="overflow-x-auto">
               <table className="w-full text-left text-xs">
                 <thead>
                   <tr className="border-b border-slate-800 text-slate-400">
@@ -684,10 +699,21 @@ export default function TransferenciasPage({ API_URL, idEquipoUsuario, idPartida
                     return (
                     <tr key={j.id_jugador} className="border-b border-slate-800/40 hover:bg-[#0b1326]">
                       <td className="p-3">
-                        <button onClick={() => toggleShortlist(j)} className={`text-base ${estaPreseleccionado(j.id_jugador) ? 'text-amber-400' : 'text-slate-600 hover:text-slate-400'}`}>★</button>
+                        <button onClick={() => toggleShortlist(j)} aria-label={estaPreseleccionado(j.id_jugador) ? `Quitar a ${j.nombre} de preseleccionados` : `Agregar a ${j.nombre} a preseleccionados`} aria-pressed={estaPreseleccionado(j.id_jugador)} className={`text-base ${estaPreseleccionado(j.id_jugador) ? 'text-amber-400' : 'text-slate-500 hover:text-slate-300'}`}>★</button>
                       </td>
-                      <td className="p-3 font-bold text-slate-200 cursor-pointer" onClick={() => setJugadorDetalle(j)}>{j.nombre}</td>
-                      <td className="p-3 text-slate-400">{j.club}</td>
+                      <td
+                        className="p-3 font-bold text-slate-200 cursor-pointer focus-visible:outline focus-visible:outline-sky-500"
+                        onClick={() => setJugadorDetalle(j)}
+                        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setJugadorDetalle(j); } }}
+                        role="button"
+                        tabIndex={0}
+                        aria-label={`Ver ficha de ${j.nombre}`}
+                      >
+                        {j.nombre}
+                      </td>
+                      <td className="p-3 text-slate-400">
+                        {j.id_equipo ? <Link to={`/club/${j.id_equipo}`} className="hover:text-sky-400 hover:underline" onClick={(e) => e.stopPropagation()}>{j.club}</Link> : j.club}
+                      </td>
                       <td className="p-3 text-sky-400" title={j.posicion}>{j.posicion_especifica || j.posicion}</td>
                       <td className="p-3 text-slate-300">{j.edad}</td>
                       <td className="p-3 font-bold text-white">{formatOverall(j)}</td>
@@ -715,7 +741,7 @@ export default function TransferenciasPage({ API_URL, idEquipoUsuario, idPartida
                             </button>
                           )
                         ) : (
-                          <CeldaAccion j={j} idsComprando={idsComprando} onAccion={abrirAccion} label={labelAccion(j)} idEquipoUsuario={idEquipoUsuario} />
+                          <CeldaAccionFichaje j={j} idsComprando={idsComprando} onAccion={abrirAccion} label={labelAccion(j)} idEquipoUsuario={idEquipoUsuario} />
                         )}
                       </td>
                     </tr>
@@ -723,6 +749,7 @@ export default function TransferenciasPage({ API_URL, idEquipoUsuario, idPartida
                   })}
                 </tbody>
               </table>
+              </div>
             )}
           </div>
         </>
@@ -732,13 +759,14 @@ export default function TransferenciasPage({ API_URL, idEquipoUsuario, idPartida
         <div className="bg-[#121e36] border border-slate-800 rounded-2xl p-6">
           <h2 className="text-sm font-bold text-white mb-4">Jugadores Preseleccionados ({preseleccionados.length})</h2>
           {preseleccionados.length === 0 ? (
-            <p className="text-xs text-slate-500">Todavía no marcaste ningún jugador. Tocá la ★ en las tablas de clubes o de búsqueda.</p>
+            <p className="text-xs text-slate-400">Todavía no marcaste ningún jugador. Tocá la ★ en las tablas de clubes o de búsqueda.</p>
           ) : (
             <>
             <div className="flex flex-wrap gap-4 items-end mb-4">
               <div>
-                <label className="text-xs text-slate-400 block mb-1">Posición</label>
+                <label htmlFor="filtro-presel-pos" className="text-xs text-slate-400 block mb-1">Posición</label>
                 <select
+                  id="filtro-presel-pos"
                   value={filtroPreselPos}
                   onChange={(e) => { setFiltroPreselPos(e.target.value); setFiltroPreselPosEspecifica(''); }}
                   className="bg-[#0b1326] border border-slate-700 p-2 rounded-lg text-white text-xs"
@@ -752,8 +780,9 @@ export default function TransferenciasPage({ API_URL, idEquipoUsuario, idPartida
               </div>
               {filtroPreselPos && (
                 <div>
-                  <label className="text-xs text-slate-400 block mb-1">Específica</label>
+                  <label htmlFor="filtro-presel-pos-especifica" className="text-xs text-slate-400 block mb-1">Específica</label>
                   <select
+                    id="filtro-presel-pos-especifica"
                     value={filtroPreselPosEspecifica}
                     onChange={(e) => setFiltroPreselPosEspecifica(e.target.value)}
                     className="bg-[#0b1326] border border-slate-700 p-2 rounded-lg text-white text-xs"
@@ -766,6 +795,7 @@ export default function TransferenciasPage({ API_URL, idEquipoUsuario, idPartida
                 </div>
               )}
             </div>
+            <div className="overflow-x-auto">
             <table className="w-full text-left text-xs">
               <thead>
                 <tr className="border-b border-slate-800 text-slate-400">
@@ -784,9 +814,18 @@ export default function TransferenciasPage({ API_URL, idEquipoUsuario, idPartida
                 {ordenPresel.ordenada.map((j) => (
                   <tr key={j.id_jugador} className="border-b border-slate-800/40 hover:bg-[#0b1326]">
                     <td className="p-3">
-                      <button onClick={() => toggleShortlist(j)} className="text-base text-amber-400">★</button>
+                      <button onClick={() => toggleShortlist(j)} aria-label={`Quitar a ${j.nombre} de preseleccionados`} aria-pressed="true" className="text-base text-amber-400">★</button>
                     </td>
-                    <td className="p-3 font-bold text-slate-200 cursor-pointer" onClick={() => setJugadorDetalle(j)}>{j.nombre}</td>
+                    <td
+                      className="p-3 font-bold text-slate-200 cursor-pointer focus-visible:outline focus-visible:outline-sky-500"
+                      onClick={() => setJugadorDetalle(j)}
+                      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setJugadorDetalle(j); } }}
+                      role="button"
+                      tabIndex={0}
+                      aria-label={`Ver ficha de ${j.nombre}`}
+                    >
+                      {j.nombre}
+                    </td>
                     <td className="p-3 text-slate-400">{j.club}</td>
                     <td className="p-3 text-sky-400" title={j.posicion}>{j.posicion_especifica || j.posicion}</td>
                     <td className="p-3 text-slate-300">{j.edad}</td>
@@ -794,12 +833,13 @@ export default function TransferenciasPage({ API_URL, idEquipoUsuario, idPartida
                     <td className="p-3 font-bold text-sky-400">${j.valor_mercado.toLocaleString('es-AR')}</td>
                     <td className="p-3"><BadgeContrato j={j} /></td>
                     <td className="p-3">
-                      <CeldaAccion j={j} idsComprando={idsComprando} onAccion={abrirAccion} label={labelAccion(j)} idEquipoUsuario={idEquipoUsuario} />
+                      <CeldaAccionFichaje j={j} idsComprando={idsComprando} onAccion={abrirAccion} label={labelAccion(j)} idEquipoUsuario={idEquipoUsuario} />
                     </td>
                   </tr>
                 ))}
               </tbody>
             </table>
+            </div>
             </>
           )}
         </div>
@@ -813,8 +853,9 @@ export default function TransferenciasPage({ API_URL, idEquipoUsuario, idPartida
             <>
               <div className="bg-[#121e36] border border-slate-800 rounded-2xl p-5 flex flex-wrap gap-4 items-end">
                 <div>
-                  <label className="text-xs text-slate-400 block mb-1">Posición</label>
+                  <label htmlFor="filtro-neg-pos" className="text-xs text-slate-400 block mb-1">Posición</label>
                   <select
+                    id="filtro-neg-pos"
                     value={filtroNegPos}
                     onChange={(e) => { setFiltroNegPos(e.target.value); setFiltroNegPosEspecifica(''); }}
                     className="bg-[#0b1326] border border-slate-700 p-2 rounded-lg text-white text-xs"
@@ -828,8 +869,9 @@ export default function TransferenciasPage({ API_URL, idEquipoUsuario, idPartida
                 </div>
                 {filtroNegPos && (
                   <div>
-                    <label className="text-xs text-slate-400 block mb-1">Específica</label>
+                    <label htmlFor="filtro-neg-pos-especifica" className="text-xs text-slate-400 block mb-1">Específica</label>
                     <select
+                      id="filtro-neg-pos-especifica"
                       value={filtroNegPosEspecifica}
                       onChange={(e) => setFiltroNegPosEspecifica(e.target.value)}
                       className="bg-[#0b1326] border border-slate-700 p-2 rounded-lg text-white text-xs"
@@ -845,21 +887,46 @@ export default function TransferenciasPage({ API_URL, idEquipoUsuario, idPartida
 
               <div className="bg-[#121e36] border border-slate-800 rounded-2xl p-6">
                 <h2 className="text-sm font-bold text-white mb-1">Ofertas recibidas por tus jugadores ({filtrarPorPosicion(negociaciones.recibidas).length})</h2>
-                <p className="text-[11px] text-slate-500 mb-4">Esperando tu respuesta.</p>
+                <p className="text-[11px] text-slate-400 mb-4">Esperando tu respuesta.</p>
                 {filtrarPorPosicion(negociaciones.recibidas).length === 0 ? (
-                  <p className="text-xs text-slate-600">No tenés ofertas pendientes.</p>
+                  <p className="text-xs text-slate-400">No tenés ofertas pendientes.</p>
                 ) : (
                   <div className="space-y-2">
                     {filtrarPorPosicion(negociaciones.recibidas).map((o) => (
-                      <div key={o.id_oferta} className="flex items-center justify-between gap-3 bg-[#0b1326] border border-slate-800 rounded-xl p-3 text-xs">
-                        <div>
-                          <p className="font-bold text-slate-200">{o.nombre_jugador} <span className="text-slate-500">({o.posicion_especifica || o.posicion} · Ovr {o.overall})</span></p>
-                          <p className="text-slate-400 mt-0.5">{o.nombre_comprador} ofrece ${o.monto_oferta.toLocaleString('es-AR')}</p>
+                      <div key={o.id_oferta} className="bg-[#0b1326] border border-slate-800 rounded-xl p-3 text-xs space-y-2">
+                        <div className="flex items-center justify-between gap-3">
+                          <div>
+                            <p className="font-bold text-slate-200">{o.nombre_jugador} <span className="text-slate-400">({o.posicion_especifica || o.posicion} · Ovr {o.overall})</span></p>
+                            <p className="text-slate-400 mt-0.5">
+                              <Link to={`/club/${o.id_equipo_comprador}`} className="hover:text-sky-400 hover:underline">{o.nombre_comprador}</Link> ofrece ${o.monto_oferta.toLocaleString('es-AR')}
+                            </p>
+                          </div>
+                          {ofertaAConfirmar?.id_oferta !== o.id_oferta && (
+                            <div className="flex gap-2 shrink-0">
+                              <button onClick={() => setOfertaAConfirmar(o)} className="bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold px-3 py-1.5 rounded-lg">Aceptar</button>
+                              <button onClick={() => responderOfertaRecibida(o.id_oferta, false)} className="bg-rose-950 hover:bg-rose-900 border border-rose-500/40 text-rose-300 px-3 py-1.5 rounded-lg">Rechazar</button>
+                            </div>
+                          )}
                         </div>
-                        <div className="flex gap-2 shrink-0">
-                          <button onClick={() => responderOfertaRecibida(o.id_oferta, true)} className="bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold px-3 py-1.5 rounded-lg">Aceptar</button>
-                          <button onClick={() => responderOfertaRecibida(o.id_oferta, false)} className="bg-rose-950 hover:bg-rose-900 border border-rose-500/40 text-rose-300 px-3 py-1.5 rounded-lg">Rechazar</button>
-                        </div>
+                        {ofertaAConfirmar?.id_oferta === o.id_oferta && (
+                          <div className="bg-emerald-950/40 border border-emerald-500/40 rounded-lg p-3 flex items-center justify-between gap-3 flex-wrap">
+                            <p className="text-emerald-300">
+                              Confirmás la venta de <span className="font-bold">{o.nombre_jugador}</span> a {o.nombre_comprador} por ${o.monto_oferta.toLocaleString('es-AR')}. Sale de tu plantel.
+                            </p>
+                            <div className="flex gap-2 shrink-0">
+                              <button
+                                onClick={confirmarVenta}
+                                disabled={confirmandoOferta}
+                                className="bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-slate-950 font-bold px-3 py-1.5 rounded-lg"
+                              >
+                                {confirmandoOferta ? 'Vendiendo...' : 'Sí, vender'}
+                              </button>
+                              <button onClick={() => setOfertaAConfirmar(null)} disabled={confirmandoOferta} className="bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-slate-300 px-3 py-1.5 rounded-lg">
+                                Cancelar
+                              </button>
+                            </div>
+                          </div>
+                        )}
                       </div>
                     ))}
                   </div>
@@ -868,15 +935,17 @@ export default function TransferenciasPage({ API_URL, idEquipoUsuario, idPartida
 
               <div className="bg-[#121e36] border border-slate-800 rounded-2xl p-6">
                 <h2 className="text-sm font-bold text-white mb-1">Compras acordadas ({filtrarPorPosicion(negociaciones.comprando).length})</h2>
-                <p className="text-[11px] text-slate-500 mb-4">Pendientes de que abra la próxima ventana de mercado.</p>
+                <p className="text-[11px] text-slate-400 mb-4">Pendientes de que abra la próxima ventana de mercado.</p>
                 {filtrarPorPosicion(negociaciones.comprando).length === 0 ? (
-                  <p className="text-xs text-slate-600">No tenés compras pendientes.</p>
+                  <p className="text-xs text-slate-400">No tenés compras pendientes.</p>
                 ) : (
                   <div className="space-y-2">
                     {filtrarPorPosicion(negociaciones.comprando).map((o) => (
                       <div key={o.id_oferta} className="bg-[#0b1326] border border-emerald-500/30 rounded-xl p-3 text-xs">
-                        <p className="font-bold text-slate-200">{o.nombre_jugador} <span className="text-slate-500">({o.posicion_especifica || o.posicion} · Ovr {formatOverall(o)})</span></p>
-                        <p className="text-emerald-400 mt-0.5">Le pagás a {o.nombre_vendedor}: ${o.monto_oferta.toLocaleString('es-AR')}</p>
+                        <p className="font-bold text-slate-200">{o.nombre_jugador} <span className="text-slate-400">({o.posicion_especifica || o.posicion} · Ovr {formatOverall(o)})</span></p>
+                        <p className="text-emerald-400 mt-0.5">
+                          Le pagás a <Link to={`/club/${o.id_equipo_vendedor}`} className="hover:underline">{o.nombre_vendedor}</Link>: ${o.monto_oferta.toLocaleString('es-AR')}
+                        </p>
                       </div>
                     ))}
                   </div>
@@ -885,15 +954,17 @@ export default function TransferenciasPage({ API_URL, idEquipoUsuario, idPartida
 
               <div className="bg-[#121e36] border border-slate-800 rounded-2xl p-6">
                 <h2 className="text-sm font-bold text-white mb-1">Ventas acordadas ({filtrarPorPosicion(negociaciones.vendiendo).length})</h2>
-                <p className="text-[11px] text-slate-500 mb-4">Pendientes de que abra la próxima ventana de mercado.</p>
+                <p className="text-[11px] text-slate-400 mb-4">Pendientes de que abra la próxima ventana de mercado.</p>
                 {filtrarPorPosicion(negociaciones.vendiendo).length === 0 ? (
-                  <p className="text-xs text-slate-600">No tenés ventas pendientes.</p>
+                  <p className="text-xs text-slate-400">No tenés ventas pendientes.</p>
                 ) : (
                   <div className="space-y-2">
                     {filtrarPorPosicion(negociaciones.vendiendo).map((o) => (
                       <div key={o.id_oferta} className="bg-[#0b1326] border border-amber-500/30 rounded-xl p-3 text-xs">
-                        <p className="font-bold text-slate-200">{o.nombre_jugador} <span className="text-slate-500">({o.posicion_especifica || o.posicion} · Ovr {o.overall})</span></p>
-                        <p className="text-amber-400 mt-0.5">Te paga {o.nombre_comprador}: ${o.monto_oferta.toLocaleString('es-AR')}</p>
+                        <p className="font-bold text-slate-200">{o.nombre_jugador} <span className="text-slate-400">({o.posicion_especifica || o.posicion} · Ovr {o.overall})</span></p>
+                        <p className="text-amber-400 mt-0.5">
+                          Te paga <Link to={`/club/${o.id_equipo_comprador}`} className="hover:underline">{o.nombre_comprador}</Link>: ${o.monto_oferta.toLocaleString('es-AR')}
+                        </p>
                       </div>
                     ))}
                   </div>
@@ -902,16 +973,16 @@ export default function TransferenciasPage({ API_URL, idEquipoUsuario, idPartida
 
               <div className="bg-[#121e36] border border-slate-800 rounded-2xl p-6">
                 <h2 className="text-sm font-bold text-white mb-1">Precontratos firmados — se suman a tu club ({filtrarPorPosicion(negociaciones.precontratos_entrantes).length})</h2>
-                <p className="text-[11px] text-slate-500 mb-4">Se incorporan libres cuando termine su contrato actual.</p>
+                <p className="text-[11px] text-slate-400 mb-4">Se incorporan libres cuando termine su contrato actual.</p>
                 {filtrarPorPosicion(negociaciones.precontratos_entrantes).length === 0 ? (
-                  <p className="text-xs text-slate-600">No tenés precontratos entrantes pendientes.</p>
+                  <p className="text-xs text-slate-400">No tenés precontratos entrantes pendientes.</p>
                 ) : (
                   <div className="space-y-2">
                     {filtrarPorPosicion(negociaciones.precontratos_entrantes).map((j) => (
                       <div key={j.id_jugador} className="bg-[#0b1326] border border-emerald-500/30 rounded-xl p-3 text-xs">
-                        <p className="font-bold text-slate-200">{j.nombre_jugador} <span className="text-slate-500">({j.posicion_especifica || j.posicion} · Ovr {formatOverall(j)})</span></p>
+                        <p className="font-bold text-slate-200">{j.nombre_jugador} <span className="text-slate-400">({j.posicion_especifica || j.posicion} · Ovr {formatOverall(j)})</span></p>
                         <p className="text-emerald-400 mt-0.5">
-                          Hoy en {j.nombre_club} · libre el {j.fecha_fin_contrato ? new Date(`${j.fecha_fin_contrato}T00:00:00`).toLocaleDateString('es-AR') : '?'} · ${j.salario_precontrato?.toLocaleString('es-AR')}/semana
+                          Hoy en {j.id_equipo_club ? <Link to={`/club/${j.id_equipo_club}`} className="hover:underline">{j.nombre_club}</Link> : j.nombre_club} · libre el {j.fecha_fin_contrato ? new Date(`${j.fecha_fin_contrato}T00:00:00`).toLocaleDateString('es-AR') : '?'} · ${j.salario_precontrato?.toLocaleString('es-AR')}/semana
                         </p>
                       </div>
                     ))}
@@ -921,16 +992,16 @@ export default function TransferenciasPage({ API_URL, idEquipoUsuario, idPartida
 
               <div className="bg-[#121e36] border border-slate-800 rounded-2xl p-6">
                 <h2 className="text-sm font-bold text-white mb-1">Precontratos firmados — se van de tu club ({filtrarPorPosicion(negociaciones.precontratos_salientes).length})</h2>
-                <p className="text-[11px] text-slate-500 mb-4">Se van libres cuando termine su contrato actual con vos.</p>
+                <p className="text-[11px] text-slate-400 mb-4">Se van libres cuando termine su contrato actual con vos.</p>
                 {filtrarPorPosicion(negociaciones.precontratos_salientes).length === 0 ? (
-                  <p className="text-xs text-slate-600">No tenés precontratos salientes pendientes.</p>
+                  <p className="text-xs text-slate-400">No tenés precontratos salientes pendientes.</p>
                 ) : (
                   <div className="space-y-2">
                     {filtrarPorPosicion(negociaciones.precontratos_salientes).map((j) => (
                       <div key={j.id_jugador} className="bg-[#0b1326] border border-amber-500/30 rounded-xl p-3 text-xs">
-                        <p className="font-bold text-slate-200">{j.nombre_jugador} <span className="text-slate-500">({j.posicion_especifica || j.posicion} · Ovr {j.overall})</span></p>
+                        <p className="font-bold text-slate-200">{j.nombre_jugador} <span className="text-slate-400">({j.posicion_especifica || j.posicion} · Ovr {j.overall})</span></p>
                         <p className="text-amber-400 mt-0.5">
-                          Se va a {j.nombre_club} el {j.fecha_fin_contrato ? new Date(`${j.fecha_fin_contrato}T00:00:00`).toLocaleDateString('es-AR') : '?'} · ${j.salario_precontrato?.toLocaleString('es-AR')}/semana
+                          Se va a {j.id_equipo_club ? <Link to={`/club/${j.id_equipo_club}`} className="hover:underline">{j.nombre_club}</Link> : j.nombre_club} el {j.fecha_fin_contrato ? new Date(`${j.fecha_fin_contrato}T00:00:00`).toLocaleDateString('es-AR') : '?'} · ${j.salario_precontrato?.toLocaleString('es-AR')}/semana
                         </p>
                       </div>
                     ))}
