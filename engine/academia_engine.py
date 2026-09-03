@@ -145,25 +145,33 @@ def generar_academia_completa(pais_club: str, factor: float = 1.0) -> list[dict]
     return jugadores
 
 
-def calcular_factor_desde_plantel(jugadores_primera: list) -> float:
+def calcular_factor_desde_plantel(jugadores_primera: list, bono_instalaciones: float = 0.0) -> float:
     """Factor de escala para generar la Academia a partir del nivel ACTUAL
     del plantel de Primera de ese club — un canterano de hoy va a ser el
     profesional de dentro de 10 años, así que su punto de partida tiene que
     guardar relación con lo que ese club concreto produce, no ser parejo en
     cualquier academia del juego (mismo mecanismo que factor_overall_liga
-    para planteles de Primera, pero anclado al club en vez de a la liga)."""
+    para planteles de Primera, pero anclado al club en vez de a la liga).
+
+    `bono_instalaciones` es el bono combinado de Instalaciones Juveniles +
+    Entrenadores Juveniles del club (0.0 = sin bono, ver Equipo en
+    models.py) — un club que invierte en su cantera saca canteranos por
+    encima de lo que su plantel de Primera solo justificaría."""
     if not jugadores_primera:
         return 1.0
     promedio = sum(j.overall for j in jugadores_primera) / len(jugadores_primera)
-    return max(0.4, min(1.15, promedio / data_gen._MAX_OVERALL_CRUDO))
+    return max(0.4, min(1.15, (promedio / data_gen._MAX_OVERALL_CRUDO) * (1 + bono_instalaciones)))
 
 
-def calcular_n_candidatos_intake(cantidad_actual: int) -> int:
+def calcular_n_candidatos_intake(cantidad_actual: int, bono_captacion: int = 0) -> int:
     """Cuántos candidatos ofrecer en el intake anual de una categoría: si
     falta gente para llegar a 15, justo los que faltan; si ya está completa,
-    5 igual, de pura oportunidad (15 es el piso anual, no el techo)."""
+    5 igual, de pura oportunidad (15 es el piso anual, no el techo).
+    `bono_captacion` (0-5) suma candidatos extra según el nivel de
+    Captación Juvenil del club."""
     gap = max(0, TAMANIO_MINIMO_CATEGORIA - cantidad_actual)
-    return gap if gap > 0 else 5
+    base = gap if gap > 0 else 5
+    return base + bono_captacion
 
 
 def crecer_juvenil(jugador) -> None:
@@ -173,11 +181,9 @@ def crecer_juvenil(jugador) -> None:
     margen de desarrollo por delante."""
     if random.random() >= 0.35:
         return
-    if jugador.ataque < jugador.potencial:
-        jugador.ataque = min(jugador.potencial, jugador.ataque + random.randint(1, 3))
-    if jugador.defensa < jugador.potencial:
-        jugador.defensa = min(jugador.potencial, jugador.defensa + random.randint(1, 3))
-    if jugador.pase < jugador.potencial:
-        jugador.pase = min(jugador.potencial, jugador.pase + random.randint(1, 3))
-    if jugador.fisico < 95:
-        jugador.fisico = min(95, jugador.fisico + random.randint(0, 2))
+    attrs = {a: getattr(jugador, a) for a in data_gen.ATRIBUTOS_ENTRENABLES}
+    for a, valor in attrs.items():
+        attrs[a] = min(jugador.potencial, valor + random.randint(1, 3))
+    data_gen.recalcular_derivados(attrs, jugador.posicion)
+    for a, valor in attrs.items():
+        setattr(jugador, a, valor)

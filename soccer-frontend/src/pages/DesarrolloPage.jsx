@@ -13,7 +13,7 @@ function BarraPotencial({ overall, potencial }) {
 
 function ConsejoDesarrollo({ jugador }) {
   const margen = jugador.margen_desarrollo;
-  if (margen <= 0) return <span className="text-slate-500">Ya cerca de su techo de potencial.</span>;
+  if (margen <= 0) return <span className="text-slate-400">Ya cerca de su techo de potencial.</span>;
   if (margen >= 15) return <span className="text-emerald-300">Podría llegar a ser un jugador de calidad, con mucho margen de mejora.</span>;
   if (margen >= 7) return <span className="text-sky-300">Tiene un potencial decente si sigue entrenando bien.</span>;
   return <span className="text-slate-400">Progresión limitada, pero puede sumar minutos.</span>;
@@ -21,9 +21,10 @@ function ConsejoDesarrollo({ jugador }) {
 
 function TablaJugadores({ jugadores, vacio, onSubirAPrimera, onVerJugador, mostrarCategoria }) {
   if (jugadores.length === 0) {
-    return <p className="text-xs text-slate-500">{vacio}</p>;
+    return <p className="text-xs text-slate-400">{vacio}</p>;
   }
   return (
+    <div className="overflow-x-auto">
     <table className="w-full text-left text-xs">
       <thead>
         <tr className="border-b border-slate-800 text-slate-400">
@@ -43,7 +44,11 @@ function TablaJugadores({ jugadores, vacio, onSubirAPrimera, onVerJugador, mostr
           <tr
             key={j.id_jugador}
             onClick={onVerJugador ? () => onVerJugador(j) : undefined}
-            className={`border-b border-slate-800/40 hover:bg-[#0b1326] ${onVerJugador ? 'cursor-pointer' : ''}`}
+            onKeyDown={onVerJugador ? (e) => { if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); onVerJugador(j); } } : undefined}
+            role={onVerJugador ? 'button' : undefined}
+            tabIndex={onVerJugador ? 0 : undefined}
+            aria-label={onVerJugador ? `Ver ficha de ${j.nombre}` : undefined}
+            className={`border-b border-slate-800/40 hover:bg-[#0b1326] focus-visible:outline focus-visible:outline-sky-500 ${onVerJugador ? 'cursor-pointer' : ''}`}
           >
             <td className="p-2 font-bold text-slate-200">{j.nombre}</td>
             {mostrarCategoria && (
@@ -69,7 +74,7 @@ function TablaJugadores({ jugadores, vacio, onSubirAPrimera, onVerJugador, mostr
                     Subir a Primera
                   </button>
                 ) : (
-                  <span className="text-[10px] text-slate-600">Muy joven</span>
+                  <span className="text-[10px] text-slate-400">Muy joven</span>
                 )}
               </td>
             )}
@@ -77,14 +82,16 @@ function TablaJugadores({ jugadores, vacio, onSubirAPrimera, onVerJugador, mostr
         ))}
       </tbody>
     </table>
+    </div>
   );
 }
 
 function TablaCedidos({ jugadores }) {
   if (jugadores.length === 0) {
-    return <p className="text-xs text-slate-500">No tenés jugadores cedidos a préstamo en este momento.</p>;
+    return <p className="text-xs text-slate-400">No tenés jugadores cedidos a préstamo en este momento.</p>;
   }
   return (
+    <div className="overflow-x-auto">
     <table className="w-full text-left text-xs">
       <thead>
         <tr className="border-b border-slate-800 text-slate-400">
@@ -109,6 +116,7 @@ function TablaCedidos({ jugadores }) {
         ))}
       </tbody>
     </table>
+    </div>
   );
 }
 
@@ -133,6 +141,7 @@ export default function DesarrolloPage({ API_URL, idEquipoUsuario }) {
   const [datos, setDatos] = useState(null);
   const [cargando, setCargando] = useState(true);
   const [jugadorDetalle, setJugadorDetalle] = useState(null);
+  const [error, setError] = useState(null);
 
   useEffect(() => {
     if (!idEquipoUsuario) return;
@@ -149,6 +158,7 @@ export default function DesarrolloPage({ API_URL, idEquipoUsuario }) {
   }
 
   const subirAPrimera = async (idJugador) => {
+    setError(null);
     try {
       const r = await fetch(`${API_URL}/jugadores/${idJugador}/categoria`, {
         method: 'POST',
@@ -157,7 +167,7 @@ export default function DesarrolloPage({ API_URL, idEquipoUsuario }) {
       });
       if (!r.ok) {
         const err = await r.json().catch(() => ({}));
-        alert(err.detail || 'No se pudo ascender al jugador.');
+        setError(err.detail || 'No se pudo ascender al jugador.');
         return;
       }
       setDatos((prev) => {
@@ -172,13 +182,20 @@ export default function DesarrolloPage({ API_URL, idEquipoUsuario }) {
         };
       });
       setJugadorDetalle(null);
-    } catch (error) {
-      console.error('Error ascendiendo a Primera:', error);
+    } catch (e) {
+      console.error('Error ascendiendo a Primera:', e);
+      setError('No se pudo conectar con el servidor.');
     }
   };
 
   return (
     <div className="space-y-6">
+      {error && (
+        <div className="bg-rose-950/60 border border-rose-500/40 text-rose-300 rounded-xl p-3 text-xs flex items-center justify-between gap-3">
+          <span>{error}</span>
+          <button onClick={() => setError(null)} className="text-rose-300 hover:text-rose-100 font-bold shrink-0">✕</button>
+        </div>
+      )}
       <div className="bg-[#121e36] border border-slate-800 rounded-2xl p-5">
         <p className="text-xs text-slate-400">INFORME DE:</p>
         <p className="text-sm font-bold text-white">Secretaría Técnica — Centro de Desarrollo de {datos.nombre_equipo}</p>
@@ -192,7 +209,7 @@ export default function DesarrolloPage({ API_URL, idEquipoUsuario }) {
 
       <div className="bg-[#121e36] border border-slate-800 rounded-2xl p-6">
         <h2 className="text-sm font-bold text-white mb-1">Destacados de la Academia</h2>
-        <p className="text-[11px] text-slate-500 mb-4">Los mejores prospectos de toda la cantera, sin importar la categoría — lo primero que conviene mirar.</p>
+        <p className="text-[11px] text-slate-400 mb-4">Los mejores prospectos de toda la cantera, sin importar la categoría — lo primero que conviene mirar.</p>
         <TablaJugadores
           jugadores={datos.destacados_academia}
           vacio="Todavía no hay prospectos destacados en la Academia."
@@ -204,25 +221,25 @@ export default function DesarrolloPage({ API_URL, idEquipoUsuario }) {
 
       <div className="bg-[#121e36] border border-slate-800 rounded-2xl p-6">
         <h2 className="text-sm font-bold text-white mb-1">Cesiones activas</h2>
-        <p className="text-[11px] text-slate-500 mb-4">Jugadores tuyos jugando a préstamo en otro club.</p>
+        <p className="text-[11px] text-slate-400 mb-4">Jugadores tuyos jugando a préstamo en otro club.</p>
         <TablaCedidos jugadores={datos.cedidos} />
       </div>
 
       <div className="bg-[#121e36] border border-slate-800 rounded-2xl p-6">
         <h2 className="text-sm font-bold text-white mb-1">Candidatos al primer equipo</h2>
-        <p className="text-[11px] text-slate-500 mb-4">Jugadores de Primera (≤21 años) que ya suman minutos en el plantel principal.</p>
+        <p className="text-[11px] text-slate-400 mb-4">Jugadores de Primera (≤21 años) que ya suman minutos en el plantel principal.</p>
         <TablaJugadores jugadores={datos.candidatos_primer_equipo} vacio="No hay jugadores jóvenes cerca de tener oportunidades en el primer equipo." onVerJugador={setJugadorDetalle} />
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <div className="bg-[#121e36] border border-slate-800 rounded-2xl p-6">
           <h2 className="text-sm font-bold text-white mb-1">Necesita atención</h2>
-          <p className="text-[11px] text-slate-500 mb-4">Jugadores de Primera en el banco de reservas con margen de progreso.</p>
+          <p className="text-[11px] text-slate-400 mb-4">Jugadores de Primera en el banco de reservas con margen de progreso.</p>
           <TablaJugadores jugadores={datos.necesita_atencion} vacio="Ningún jugador en reserva necesita atención especial ahora mismo." onVerJugador={setJugadorDetalle} />
         </div>
         <div className="bg-[#121e36] border border-slate-800 rounded-2xl p-6">
           <h2 className="text-sm font-bold text-white mb-1">Jugadores a vigilar</h2>
-          <p className="text-[11px] text-slate-500 mb-4">Jugadores de Primera con proyección que conviene seguir de cerca.</p>
+          <p className="text-[11px] text-slate-400 mb-4">Jugadores de Primera con proyección que conviene seguir de cerca.</p>
           <TablaJugadores jugadores={datos.jugadores_a_vigilar} vacio="No hay jugadores destacados para vigilar por ahora." onVerJugador={setJugadorDetalle} />
         </div>
       </div>
@@ -230,7 +247,7 @@ export default function DesarrolloPage({ API_URL, idEquipoUsuario }) {
       {CATEGORIAS_TABLA.map(({ key, titulo }) => (
         <div key={key} className="bg-[#121e36] border border-slate-800 rounded-2xl p-6">
           <h2 className="text-sm font-bold text-white mb-1">Plantilla {titulo} completa</h2>
-          <p className="text-[11px] text-slate-500 mb-4">
+          <p className="text-[11px] text-slate-400 mb-4">
             Jugadores reales de la categoría {titulo} de la Academia — hacé click en uno para ver su ficha completa.
           </p>
           <TablaJugadores

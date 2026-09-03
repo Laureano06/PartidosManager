@@ -1,9 +1,27 @@
 import random
 
-from engine.data_gen import gen_player_dict, _valor_mercado_real, _overall, _generar_potencial
+from engine.data_gen import (
+    gen_player_dict, _valor_mercado_real, _overall, _generar_potencial, recalcular_derivados, ATRIBUTOS_ENTRENABLES,
+)
 from engine.academia_engine import crecer_juvenil, categoria_tras_cumplir_anios
 
 TIPOS_RETIRO_EDAD = 35
+
+
+def _envejecer_attrs(j, delta: int) -> None:
+    """Aplica +-delta a todos los atributos base entrenables y recalcula los
+    4 derivados de siempre desde sus componentes."""
+    if delta == 0:
+        return
+    attrs = {a: getattr(j, a) for a in ATRIBUTOS_ENTRENABLES}
+    for a, valor in attrs.items():
+        if delta > 0:
+            attrs[a] = min(j.potencial, valor + delta)
+        else:
+            attrs[a] = max(30, valor + delta)
+    recalcular_derivados(attrs, j.posicion)  # agrega ataque/defensa/pase/fisico al dict, in-place
+    for a, valor in attrs.items():
+        setattr(j, a, valor)
 
 
 def aplicar_desgaste(jugadores_por_id: dict, energia_gastada: dict) -> None:
@@ -71,8 +89,7 @@ def procesar_fin_temporada(jugadores: list) -> list:
                 mejora = random.randint(0, 1)  # sumó algunos minutos, progreso mínimo
             else:
                 mejora = 0  # apenas jugó: sin rodaje no hay desarrollo
-            j.ataque = min(j.potencial, j.ataque + mejora)
-            j.defensa = min(j.potencial, j.defensa + mejora)
+            _envejecer_attrs(j, mejora)
         elif j.edad > 30:
             if tuvo_buena_temporada:
                 # Puede sostener su nivel — incluso una gran temporada a
@@ -80,8 +97,7 @@ def procesar_fin_temporada(jugadores: list) -> list:
                 declive = random.choice([-1, 0, 0, 1, 1])
             else:
                 declive = random.randint(1, 3)  # perdió el puesto: declive más marcado
-            j.ataque = max(30, j.ataque - declive)
-            j.defensa = max(30, j.defensa - declive)
+            _envejecer_attrs(j, -declive)
 
         # El pase de un jugador tiene que reflejar cómo quedó después de
         # envejecer/desarrollarse, no el valor congelado del día que se

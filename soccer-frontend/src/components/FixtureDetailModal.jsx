@@ -1,20 +1,23 @@
 import React from 'react';
+import { Link } from 'react-router-dom';
 import Modal from './Modal';
 
 export default function FixtureDetailModal({ fixture, open, onClose, esProximo }) {
   if (!fixture) return null;
 
   return (
-    <Modal open={open} onClose={onClose}>
+    <Modal open={open} onClose={onClose} labelledBy="fixture-modal-title">
       <div className="p-8 sm:p-12 max-w-lg mx-auto space-y-6">
         <div className="text-center border-b border-slate-800 pb-6">
-          <span className="text-xs text-slate-500 uppercase font-bold tracking-widest">
+          <span className="text-xs text-slate-400 uppercase font-bold tracking-widest">
             {fixture.tipo === 'COPA'
               ? `${fixture.nombre_competencia || 'Copa'} — ${(fixture.ronda_copa || '').replace(/_/g, ' ')}`
               : `Jornada ${fixture.num_jornada}`}
           </span>
-          <h3 className="text-2xl font-black text-white mt-2">
-            {fixture.nombre_local} <span className="text-slate-500">vs</span> {fixture.nombre_visitante}
+          <h3 id="fixture-modal-title" className="text-2xl font-black text-white mt-2">
+            <Link to={`/club/${fixture.id_local}`} onClick={onClose} className="hover:text-sky-400 hover:underline">{fixture.nombre_local}</Link>
+            {' '}<span className="text-slate-500">vs</span>{' '}
+            <Link to={`/club/${fixture.id_visitante}`} onClick={onClose} className="hover:text-sky-400 hover:underline">{fixture.nombre_visitante}</Link>
           </h3>
           {fixture.jugado ? (
             <p className="text-4xl font-black text-sky-400 mt-4">{fixture.goles_local} - {fixture.goles_visitante}</p>

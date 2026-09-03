@@ -16,6 +16,28 @@ class JugadorOut(BaseModel):
     defensa: int
     pase: int
     fisico: int
+    finalizacion: int
+    regate: int
+    primer_toque: int
+    centros: int
+    cabeceo: int
+    marcaje: int
+    entradas: int
+    tiros_lejanos: int
+    agresividad: int
+    valentia: int
+    decisiones: int
+    concentracion: int
+    anticipacion: int
+    compostura: int
+    vision: int
+    liderazgo: int
+    ritmo: int
+    aceleracion: int
+    resistencia: int
+    fuerza: int
+    agilidad: int
+    porteria: int
     energia: int
     moral: int
     valor_mercado: int
@@ -33,6 +55,8 @@ class JugadorOut(BaseModel):
     id_equipo_dueno: int | None
     fin_cesion: date | None
     opcion_compra: int | None
+    clausula_rescision: int | None = None
+    foco_individual: str | None = None
 
 
 class LigaOut(BaseModel):
@@ -51,6 +75,7 @@ class EquipoOut(BaseModel):
     color: str
     escudo_url: str | None = None
     es_usuario: bool
+    reputacion: int
     presupuesto_fichajes: int
     presupuesto_salarios: int
     puntos: int
@@ -60,6 +85,11 @@ class EquipoOut(BaseModel):
     perdidos: int
     goles_favor: int
     goles_contra: int
+    id_capitan: int | None = None
+
+
+class CapitanIn(BaseModel):
+    id_jugador: int | None = None
 
 
 class ClubJugadorIn(BaseModel):
@@ -88,6 +118,37 @@ class EntrenamientoIn(BaseModel):
     intensidad: str
 
 
+class CharlaEquipoIn(BaseModel):
+    id_fixture: int
+    id_equipo: int
+    tono: str
+
+
+class EntrenamientoIndividualIn(BaseModel):
+    id_jugador: int
+    foco: str | None = None
+
+
+class OfertaParticipacionIn(BaseModel):
+    id_equipo_iniciador: int
+    id_equipo_contraparte: int
+    operacion: str   # COMPRAR | VENDER
+    porcentaje: int
+
+
+class MoverJugadorIn(BaseModel):
+    id_jugador: int
+    id_equipo_destino: int
+    operacion: str  # PRESTAMO | TRANSFERENCIA
+    duracion_meses: int | None = None  # requerido si operacion == PRESTAMO
+    opcion_compra: int | None = None
+
+
+class InfluenciaIn(BaseModel):
+    id_afiliacion: int
+    habilitada: bool
+
+
 class OfertaIn(BaseModel):
     id_jugador: int
     id_equipo_comprador: int
@@ -98,6 +159,15 @@ class OfertaIn(BaseModel):
 class RespuestaOfertaIn(BaseModel):
     id_oferta: int
     aceptar: bool
+    # Solo tiene efecto si aceptar=True: el vendedor pide quedarse con este %
+    # de lo que el jugador genere en su PRÓXIMA venta (se consume al disparar
+    # una vez — ver _efectivizar_ofertas_pendientes en main.py).
+    porcentaje_reventa_solicitado: int | None = None
+
+
+class AddOnIn(BaseModel):
+    partidos: int
+    monto: int
 
 
 class NegociarContratoTraspasoIn(BaseModel):
@@ -106,6 +176,7 @@ class NegociarContratoTraspasoIn(BaseModel):
     monto_oferta: int
     salario_ofrecido: int
     ronda: int = 0
+    addons: list[AddOnIn] = []
 
 
 class SimularJornadaIn(BaseModel):
@@ -118,6 +189,7 @@ class RenovarContratoIn(BaseModel):
     salario_propuesto: int
     anios: int = 3
     ronda: int = 0
+    clausula_rescision: int | None = None
 
 
 class PrecontratoIn(BaseModel):
@@ -125,6 +197,7 @@ class PrecontratoIn(BaseModel):
     id_equipo_destino: int
     salario_ofrecido: int
     ronda: int = 0
+    clausula_rescision: int | None = None
 
 
 class FicharLibreIn(BaseModel):
@@ -132,6 +205,7 @@ class FicharLibreIn(BaseModel):
     id_equipo: int
     salario_ofrecido: int
     ronda: int = 0
+    clausula_rescision: int | None = None
 
 
 class TransferibleIn(BaseModel):

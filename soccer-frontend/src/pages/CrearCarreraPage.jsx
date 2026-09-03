@@ -224,11 +224,11 @@ export default function CrearCarreraPage({ API_URL, dataset, onCarreraCreada, on
               "Bienvenido, {nombreDT.trim() || 'Técnico'}. Antes de empezar, queremos ser claros sobre lo que esperamos de esta temporada."
             </p>
             <div>
-              <p className="text-[11px] text-slate-500 uppercase tracking-wider mb-1">Objetivo de la temporada</p>
+              <p className="text-[11px] text-slate-400 uppercase tracking-wider mb-1">Objetivo de la temporada</p>
               <p className="text-sm font-bold text-amber-300">{contratoOfrecido.objetivo_temporada}</p>
             </div>
             <div>
-              <p className="text-[11px] text-slate-500 uppercase tracking-wider mb-1">Oferta de contrato</p>
+              <p className="text-[11px] text-slate-400 uppercase tracking-wider mb-1">Oferta de contrato</p>
               <p className="text-sm font-bold text-white">
                 {contratoOfrecido.contrato_dt_anios} año{contratoOfrecido.contrato_dt_anios === 1 ? '' : 's'}
                 {contratoOfrecido.contrato_dt_fecha_fin ? ` — hasta el ${new Date(`${contratoOfrecido.contrato_dt_fecha_fin}T00:00:00`).toLocaleDateString('es-AR')}` : ''}
@@ -236,7 +236,7 @@ export default function CrearCarreraPage({ API_URL, dataset, onCarreraCreada, on
             </div>
           </div>
 
-          <p className="text-[11px] text-slate-500">
+          <p className="text-[11px] text-slate-400">
             No cumplir el objetivo con el correr de las temporadas puede costarte la confianza de la directiva — y el puesto.
           </p>
 
@@ -250,7 +250,7 @@ export default function CrearCarreraPage({ API_URL, dataset, onCarreraCreada, on
           <button
             onClick={descartarYVolver}
             disabled={descartando}
-            className="w-full text-slate-500 hover:text-slate-300 disabled:opacity-40 text-xs font-bold py-1"
+            className="w-full text-slate-400 hover:text-slate-300 disabled:opacity-40 text-xs font-bold py-1"
           >
             {descartando ? 'Descartando...' : 'No me convence este club, volver a elegir'}
           </button>
@@ -264,12 +264,13 @@ export default function CrearCarreraPage({ API_URL, dataset, onCarreraCreada, on
       <div className="max-w-lg w-full bg-[#121e36] border border-slate-700/60 rounded-3xl p-8 shadow-2xl space-y-5">
         <div className="flex items-center justify-between">
           <h1 className="text-xl font-black text-white">Crear carrera nueva</h1>
-          <button onClick={onVolver} className="text-xs text-slate-500 hover:text-slate-300">← Volver</button>
+          <button onClick={onVolver} className="text-xs text-slate-400 hover:text-slate-300">← Volver</button>
         </div>
 
         <div>
-          <label className="text-xs text-slate-400 block mb-1">Nombre del DT</label>
+          <label htmlFor="crear-carrera-nombre-dt" className="text-xs text-slate-400 block mb-1">Nombre del DT</label>
           <input
+            id="crear-carrera-nombre-dt"
             value={nombreDT}
             onChange={(e) => setNombreDT(e.target.value)}
             placeholder="Tu nombre"
@@ -280,8 +281,9 @@ export default function CrearCarreraPage({ API_URL, dataset, onCarreraCreada, on
         {dataset === 'personalizada' && (
           <div className="space-y-3">
             <div>
-              <label className="text-xs text-slate-400 block mb-1">Nombres de club</label>
+              <label htmlFor="crear-carrera-paquete" className="text-xs text-slate-400 block mb-1">Nombres de club</label>
               <select
+                id="crear-carrera-paquete"
                 value={paqueteElegido}
                 onChange={(e) => setPaqueteElegido(e.target.value)}
                 className="w-full bg-[#0b1326] border border-slate-700 p-3 rounded-xl text-white text-sm"
@@ -299,12 +301,13 @@ export default function CrearCarreraPage({ API_URL, dataset, onCarreraCreada, on
             {paqueteElegido === NUEVO && (
               <div className="space-y-4">
                 <div>
-                  <label className="text-xs text-slate-400 block mb-1">
+                  <label htmlFor="crear-carrera-csv-clubes" className="text-xs text-slate-400 block mb-1">
                     Clubes — una línea por club: LIGA,CODIGO,NOMBRE,ESCUDO_URL,NOMBRE_COMPETENCIA
                   </label>
                   <input
                     type="file"
                     accept=".csv,text/csv"
+                    aria-label="Subir archivo CSV de clubes"
                     onChange={async (e) => {
                       const archivo = e.target.files?.[0];
                       if (archivo) setCsvTexto(await leerArchivoComoTexto(archivo));
@@ -313,25 +316,27 @@ export default function CrearCarreraPage({ API_URL, dataset, onCarreraCreada, on
                     className="w-full text-xs text-slate-400 file:mr-3 file:bg-slate-800 file:hover:bg-slate-700 file:text-slate-300 file:text-xs file:font-bold file:border-0 file:px-3 file:py-1.5 file:rounded-lg mb-2"
                   />
                   <textarea
+                    id="crear-carrera-csv-clubes"
                     value={csvTexto}
                     onChange={(e) => setCsvTexto(e.target.value)}
                     placeholder={"ARG1,BOC,Mi Club Favorito\nARG1,RIV,Otro Club,https://ejemplo.com/escudo.png,Mi Liga Real"}
                     rows={4}
                     className="w-full bg-[#0b1326] border border-slate-700 p-3 rounded-xl text-white text-xs font-mono"
                   />
-                  <p className="text-[10px] text-slate-500 mt-1">
+                  <p className="text-[10px] text-slate-400 mt-1">
                     ESCUDO_URL y NOMBRE_COMPETENCIA son opcionales. Las ligas o clubes que no incluyas acá quedan con nombres ficticios
                     por defecto. Vos sos responsable de qué nombres/URLs pongas acá.
                   </p>
                 </div>
 
                 <div>
-                  <label className="text-xs text-slate-400 block mb-1">
+                  <label htmlFor="crear-carrera-csv-jugadores" className="text-xs text-slate-400 block mb-1">
                     Jugadores reales (opcional) — LIGA,CODIGO_CLUB,NOMBRE,POSICION,POSICION_ESPECIFICA,NACIONALIDAD,EDAD,ATAQUE,DEFENSA,PASE,FISICO
                   </label>
                   <input
                     type="file"
                     accept=".csv,text/csv"
+                    aria-label="Subir archivo CSV de jugadores"
                     onChange={async (e) => {
                       const archivo = e.target.files?.[0];
                       if (archivo) setCsvJugadoresTexto(await leerArchivoComoTexto(archivo));
@@ -340,13 +345,14 @@ export default function CrearCarreraPage({ API_URL, dataset, onCarreraCreada, on
                     className="w-full text-xs text-slate-400 file:mr-3 file:bg-slate-800 file:hover:bg-slate-700 file:text-slate-300 file:text-xs file:font-bold file:border-0 file:px-3 file:py-1.5 file:rounded-lg mb-2"
                   />
                   <textarea
+                    id="crear-carrera-csv-jugadores"
                     value={csvJugadoresTexto}
                     onChange={(e) => setCsvJugadoresTexto(e.target.value)}
                     placeholder={"ARG1,BOC,Nombre Real,DEL,DC,Argentina,24,82,30,65,78"}
                     rows={4}
                     className="w-full bg-[#0b1326] border border-slate-700 p-3 rounded-xl text-white text-xs font-mono"
                   />
-                  <p className="text-[10px] text-slate-500 mt-1">
+                  <p className="text-[10px] text-slate-400 mt-1">
                     Solo POSICION/NOMBRE/atributos son obligatorios — el resto del plantel de cada club se completa ficticio normal.
                     Los clubes que no incluyas acá quedan 100% ficticios. Vos sos responsable de qué datos pongas acá.
                   </p>
@@ -366,6 +372,7 @@ export default function CrearCarreraPage({ API_URL, dataset, onCarreraCreada, on
                         value={competencias[clave]}
                         onChange={(e) => setCompetencias((prev) => ({ ...prev, [clave]: e.target.value }))}
                         placeholder={etiqueta}
+                        aria-label={etiqueta}
                         className="w-full bg-[#0b1326] border border-slate-700 p-2 rounded-lg text-white text-xs"
                       />
                     ))}
@@ -381,6 +388,7 @@ export default function CrearCarreraPage({ API_URL, dataset, onCarreraCreada, on
                     value={nombrePaqueteNuevo}
                     onChange={(e) => setNombrePaqueteNuevo(e.target.value)}
                     placeholder="Nombre para esta lista (ej: Mi liga de amigos)"
+                    aria-label="Nombre para esta lista"
                     className="w-full bg-[#0b1326] border border-slate-700 p-2.5 rounded-xl text-white text-xs"
                   />
                 )}
@@ -392,8 +400,9 @@ export default function CrearCarreraPage({ API_URL, dataset, onCarreraCreada, on
         {catalogo && (
           <>
             <div>
-              <label className="text-xs text-slate-400 block mb-1">Liga</label>
+              <label htmlFor="crear-carrera-liga" className="text-xs text-slate-400 block mb-1">Liga</label>
               <select
+                id="crear-carrera-liga"
                 value={ligaSeleccionada}
                 onChange={(e) => setLigaSeleccionada(e.target.value)}
                 className="w-full bg-[#0b1326] border border-slate-700 p-3 rounded-xl text-white text-sm"
@@ -405,8 +414,9 @@ export default function CrearCarreraPage({ API_URL, dataset, onCarreraCreada, on
             </div>
 
             <div>
-              <label className="text-xs text-slate-400 block mb-1">Tu club</label>
+              <label htmlFor="crear-carrera-club" className="text-xs text-slate-400 block mb-1">Tu club</label>
               <select
+                id="crear-carrera-club"
                 value={clubSeleccionado}
                 onChange={(e) => setClubSeleccionado(e.target.value)}
                 className="w-full bg-[#0b1326] border border-slate-700 p-3 rounded-xl text-white text-sm"
@@ -420,7 +430,7 @@ export default function CrearCarreraPage({ API_URL, dataset, onCarreraCreada, on
 
             <div>
               <label className="text-xs text-slate-400 block mb-1">Ligas a cargar completas</label>
-              <p className="text-[10px] text-slate-500 mb-2">
+              <p className="text-[10px] text-slate-400 mb-2">
                 Una liga "completa" tiene fixture y tabla propia. Las demás quedan "de vista": tienen clubes y jugadores
                 (podés scoutearlos, ficharlos, y pueden clasificar a los torneos internacionales) pero sin liga propia jugándose.
                 La liga de tu club se carga completa siempre.
@@ -441,7 +451,7 @@ export default function CrearCarreraPage({ API_URL, dataset, onCarreraCreada, on
                             onChange={() => toggleLigaCompleta(l.codigo)}
                             className="accent-sky-500"
                           />
-                          {l.nombre} {forzada && <span className="text-slate-500">(la tuya)</span>}
+                          {l.nombre} {forzada && <span className="text-slate-400">(la tuya)</span>}
                         </label>
                       );
                     })}

@@ -11,7 +11,7 @@ function Metrica({ titulo, valor, sub }) {
     <div className="bg-[#121e36] border border-slate-800 rounded-2xl p-5 space-y-1">
       <p className="text-xs text-slate-400 uppercase tracking-wider">{titulo}</p>
       <p className="text-2xl font-black text-white">{valor}</p>
-      {sub && <p className="text-[11px] text-slate-500">{sub}</p>}
+      {sub && <p className="text-[11px] text-slate-400">{sub}</p>}
     </div>
   );
 }
@@ -61,10 +61,11 @@ export default function EconomiaPage({ API_URL, idEquipoUsuario }) {
 
       <div className="bg-[#121e36] border border-slate-800 rounded-2xl p-6">
         <h2 className="text-sm font-bold text-white mb-1">Sueldos más altos del plantel</h2>
-        <p className="text-[11px] text-slate-500 mb-4">Los jugadores que más pesan en la masa salarial semanal.</p>
+        <p className="text-[11px] text-slate-400 mb-4">Los jugadores que más pesan en la masa salarial semanal.</p>
         {datos.top_sueldos.length === 0 ? (
-          <p className="text-xs text-slate-500">No hay jugadores bajo contrato todavía.</p>
+          <p className="text-xs text-slate-400">No hay jugadores bajo contrato todavía.</p>
         ) : (
+          <div className="overflow-x-auto">
           <table className="w-full text-left text-xs">
             <thead>
               <tr className="border-b border-slate-800 text-slate-400">
@@ -89,6 +90,7 @@ export default function EconomiaPage({ API_URL, idEquipoUsuario }) {
               ))}
             </tbody>
           </table>
+          </div>
         )}
       </div>
     </div>

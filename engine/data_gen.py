@@ -297,16 +297,111 @@ def random_posicion_especifica(pos: str) -> str:
     return random.choice(opciones)
 
 
-def gen_attributes(pos: str) -> dict:
+# Rangos por posición de cada atributo nuevo estilo FM (escala 1-99, NO la
+# 1-20 de FM). Estructura: {atributo: {posición: (piso, techo)}}. Técnico:
+_RANGOS_TECNICO = {
+    "finalizacion": {"POR": (10, 25), "DEF": (15, 40), "MED": (40, 70), "DEL": (60, 90)},
+    "regate": {"POR": (10, 25), "DEF": (20, 45), "MED": (45, 75), "DEL": (55, 88)},
+    "primer_toque": {"POR": (35, 60), "DEF": (40, 65), "MED": (55, 85), "DEL": (50, 80)},
+    "centros": {"POR": (10, 25), "DEF": (35, 60), "MED": (45, 75), "DEL": (40, 70)},
+    "cabeceo": {"POR": (15, 35), "DEF": (55, 85), "MED": (35, 60), "DEL": (50, 80)},
+    "marcaje": {"POR": (15, 35), "DEF": (60, 90), "MED": (40, 70), "DEL": (15, 40)},
+    "entradas": {"POR": (10, 25), "DEF": (55, 88), "MED": (40, 70), "DEL": (15, 35)},
+    "tiros_lejanos": {"POR": (10, 25), "DEF": (20, 45), "MED": (40, 70), "DEL": (45, 80)},
+    "pase": {"POR": (35, 65), "DEF": (35, 65), "MED": (55, 90), "DEL": (35, 70)},
+}
+# Mental (de sabor salvo valentia/decisiones/vision, ver recalcular_derivados):
+_RANGOS_MENTAL = {
+    "agresividad": {"POR": (25, 55), "DEF": (45, 80), "MED": (40, 75), "DEL": (35, 70)},
+    "valentia": {"POR": (50, 85), "DEF": (50, 85), "MED": (40, 70), "DEL": (35, 65)},
+    "decisiones": {"POR": (45, 75), "DEF": (45, 78), "MED": (50, 85), "DEL": (45, 80)},
+    "concentracion": {"POR": (55, 85), "DEF": (45, 80), "MED": (45, 78), "DEL": (40, 75)},
+    "anticipacion": {"POR": (50, 85), "DEF": (50, 85), "MED": (40, 70), "DEL": (40, 70)},
+    "compostura": {"POR": (45, 80), "DEF": (40, 75), "MED": (40, 75), "DEL": (40, 75)},
+    "vision": {"POR": (25, 50), "DEF": (30, 60), "MED": (55, 88), "DEL": (40, 70)},
+    "liderazgo": {"POR": (30, 75), "DEF": (30, 75), "MED": (30, 75), "DEL": (30, 75)},
+}
+# Físico:
+_RANGOS_FISICO = {
+    "ritmo": {"POR": (25, 50), "DEF": (45, 75), "MED": (45, 75), "DEL": (55, 90)},
+    "aceleracion": {"POR": (25, 50), "DEF": (45, 75), "MED": (45, 75), "DEL": (55, 90)},
+    "resistencia": {"POR": (45, 80), "DEF": (45, 80), "MED": (55, 85), "DEL": (45, 80)},
+    "fuerza": {"POR": (40, 70), "DEF": (50, 85), "MED": (40, 75), "DEL": (40, 80)},
+    "agilidad": {"POR": (50, 85), "DEF": (40, 75), "MED": (40, 75), "DEL": (45, 80)},
+}
+
+
+# Atributos base que efectivamente envejecen/crecen fuera del entrenamiento
+# (fin de temporada, Academia) — técnico + físico completos, más los
+# mentales que SÍ alimentan algún derivado (valentia/anticipacion →
+# defensa, vision/decisiones → pase). Los mentales "de sabor" (agresividad,
+# concentracion, compostura, liderazgo) quedan fuera a propósito.
+ATRIBUTOS_ENTRENABLES = [
+    "finalizacion", "regate", "primer_toque", "centros", "cabeceo", "marcaje", "entradas", "tiros_lejanos", "pase",
+    "valentia", "vision", "decisiones", "anticipacion",
+    "ritmo", "aceleracion", "resistencia", "fuerza", "agilidad",
+    "porteria",
+]
+
+
+def recalcular_derivados(attrs: dict, pos: str) -> dict:
+    """Recalcula in-place ataque/defensa/pase/fisico (los 4 'de siempre')
+    como promedio de sus atributos componentes — se llama después de
+    generar, entrenar o envejecer cualquier atributo nuevo, para que
+    overall/el motor de partido/las negociaciones (que solo leen estos 4)
+    sigan reflejando el estado real del jugador. Para POR, defensa no usa
+    marcaje/entradas/cabeceo (irrelevantes para un arquero) sino porteria
+    como componente principal."""
     if pos == "POR":
-        ata, de, pa, fi = random.randint(15, 35), random.randint(55, 90), random.randint(35, 65), random.randint(50, 85)
-    elif pos == "DEF":
-        ata, de, pa, fi = random.randint(20, 50), random.randint(55, 90), random.randint(35, 65), random.randint(55, 85)
-    elif pos == "MED":
-        ata, de, pa, fi = random.randint(40, 75), random.randint(35, 70), random.randint(55, 90), random.randint(50, 80)
+        attrs["defensa"] = round((attrs["porteria"] * 2 + attrs["valentia"] + attrs["anticipacion"]) / 4)
     else:
-        ata, de, pa, fi = random.randint(55, 90), random.randint(15, 45), random.randint(35, 70), random.randint(50, 85)
-    return {"ataque": ata, "defensa": de, "pase": pa, "fisico": fi}
+        attrs["defensa"] = round((attrs["marcaje"] + attrs["entradas"] + attrs["cabeceo"] + attrs["valentia"]) / 4)
+    attrs["ataque"] = round((attrs["finalizacion"] + attrs["regate"] + attrs["tiros_lejanos"] + attrs["centros"]) / 4)
+    attrs["pase"] = round((attrs["pase"] + attrs["vision"] + attrs["primer_toque"] + attrs["decisiones"]) / 4)
+    attrs["fisico"] = round((attrs["ritmo"] + attrs["aceleracion"] + attrs["resistencia"] + attrs["fuerza"] + attrs["agilidad"]) / 5)
+    return attrs
+
+
+def gen_attributes(pos: str) -> dict:
+    attrs = {}
+    for grupo in (_RANGOS_TECNICO, _RANGOS_MENTAL, _RANGOS_FISICO):
+        for attr, rangos in grupo.items():
+            lo, hi = rangos.get(pos, rangos["MED"])
+            attrs[attr] = random.randint(lo, hi)
+    attrs["porteria"] = random.randint(55, 90) if pos == "POR" else random.randint(1, 20)
+    recalcular_derivados(attrs, pos)
+    return attrs
+
+
+def derivar_attrs_desde_4(ataque: int, defensa: int, pase: int, fisico: int, pos: str) -> dict:
+    """Deriva valores plausibles para los ~19 atributos nuevos a partir de
+    los 4 'de siempre' de un jugador YA EXISTENTE (jitter aleatorio
+    alrededor del valor legado, respetando qué atributos deberían salir
+    altos/bajos según ataque/defensa/pase/fisico) — usado por gen_player_real
+    (datos reales importados solo traen los 4 de siempre) y por la
+    migración que backfillea jugadores ya creados en partidas en curso.
+    Tras aplicar esto, recalcular_derivados debería devolver ataque/defensa/
+    pase/fisico muy cerca de los valores originales, por diseño."""
+    def jit(base, spread=8):
+        return max(1, min(99, base + random.randint(-spread, spread)))
+
+    attrs = {
+        "finalizacion": jit(ataque), "regate": jit(ataque), "tiros_lejanos": jit(ataque), "centros": jit(ataque),
+        "marcaje": jit(defensa), "entradas": jit(defensa), "cabeceo": jit(defensa),
+        "pase": jit(pase), "primer_toque": jit(pase),
+        "ritmo": jit(fisico), "aceleracion": jit(fisico), "resistencia": jit(fisico),
+        "fuerza": jit(fisico), "agilidad": jit(fisico),
+        "vision": jit(pase), "decisiones": jit(pase),
+        "valentia": jit(defensa),
+    }
+    for attr, rangos in _RANGOS_MENTAL.items():
+        if attr in attrs:
+            continue
+        lo, hi = rangos.get(pos, rangos["MED"])
+        attrs[attr] = random.randint(lo, hi)
+    attrs["porteria"] = jit(defensa, 10) if pos == "POR" else random.randint(1, 20)
+    recalcular_derivados(attrs, pos)
+    return attrs
 
 
 def _escalar_attrs(attrs: dict, factor: float) -> dict:
@@ -415,10 +510,9 @@ def gen_player_real(datos: dict) -> dict:
     overall/potencial/valor/salario se calculan con las MISMAS fórmulas que
     el resto del juego."""
     pos = datos["posicion"]
-    attrs = {
-        "ataque": int(datos["ataque"]), "defensa": int(datos["defensa"]),
-        "pase": int(datos["pase"]), "fisico": int(datos["fisico"]),
-    }
+    attrs = derivar_attrs_desde_4(
+        int(datos["ataque"]), int(datos["defensa"]), int(datos["pase"]), int(datos["fisico"]), pos,
+    )
     edad = int(datos["edad"])
     overall = _overall({**attrs, "posicion": pos})
     potencial = _generar_potencial(overall, edad)

@@ -113,6 +113,10 @@ class Equipo(Base):
     color: Mapped[str] = mapped_column(String(10), default="#173C2E")
     es_usuario: Mapped[bool] = mapped_column(Boolean, default=False)
     reputacion: Mapped[int] = mapped_column(Integer, default=50)
+    # Capitán del plantel PRIMERA (opcional): su liderazgo atenúa el
+    # castigo de vestuario cuando el ánimo del plantel está dividido —
+    # ver _puntaje_vestuario en main.py.
+    id_capitan: Mapped[int | None] = mapped_column(ForeignKey("jugadores.id_jugador"), nullable=True)
     # URL de escudo provista por un tercero (su propio hosting) al crear la
     # partida con datos personalizados — el juego solo la muestra con
     # <img>, nunca la descarga ni la aloja. NULL = sin escudo, se muestra
@@ -133,12 +137,64 @@ class Equipo(Base):
     goles_favor: Mapped[int] = mapped_column(Integer, default=0)
     goles_contra: Mapped[int] = mapped_column(Integer, default=0)
 
+    # Red de marca (estilo Red Bull: RB Leipzig / RB Bragantino) — clubes con
+    # el mismo tag comparten identidad/metodología. NULL = sin red de marca.
+    # No es una relación de accionista (ver AfiliacionClub para eso) y no es
+    # comprable/vendible: se fija una sola vez al generar el mundo.
+    red_marca: Mapped[str | None] = mapped_column(String(30), nullable=True)
+
     jugadores: Mapped[list["Jugador"]] = relationship(
         back_populates="equipo", foreign_keys="Jugador.id_equipo", cascade="all, delete-orphan"
     )
     tactica: Mapped["Tactica"] = relationship(back_populates="equipo", uselist=False, cascade="all, delete-orphan")
     plan_entrenamiento: Mapped["PlanEntrenamiento"] = relationship(back_populates="equipo", uselist=False, cascade="all, delete-orphan")
     personal_tecnico: Mapped["PersonalTecnico"] = relationship(back_populates="equipo", uselist=False, cascade="all, delete-orphan")
+
+
+class AfiliacionClub(Base):
+    """Participación accionaria de un club en otro — cubre los 3 modelos
+    multiclub comprables/vendibles (PROPIETARIO/SATELITE/MINORITARIO, ver
+    engine/multiclub_engine.py::tipo_relacion_por_porcentaje). Una fila por
+    par (inversor, participado); comprar más actualiza el porcentaje en la
+    misma fila en vez de insertar otra."""
+    __tablename__ = "afiliaciones_club"
+
+    id_afiliacion: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    id_partida: Mapped[int] = mapped_column(ForeignKey("partidas.id_partida"))
+    id_equipo_inversor: Mapped[int] = mapped_column(ForeignKey("equipos.id_equipo"))
+    id_equipo_participado: Mapped[int] = mapped_column(ForeignKey("equipos.id_equipo"))
+    porcentaje: Mapped[int] = mapped_column(Integer, nullable=False)
+    tipo_relacion: Mapped[str] = mapped_column(String(15), nullable=False)  # PROPIETARIO, SATELITE, MINORITARIO
+    fecha_adquisicion: Mapped[date] = mapped_column(Date, nullable=False)
+    # Solo togglable por el inversor cuando tipo_relacion es SATELITE o
+    # PROPIETARIO — habilita el pipeline de préstamos/transferencias y
+    # gestionar táctica/entrenamiento/fichajes del participado (ver
+    # clubActivo en el frontend y ejecutar_ia_mercado, que lo excluye del
+    # mercado autónomo de la IA mientras esté habilitado).
+    influencia_habilitada: Mapped[bool] = mapped_column(Boolean, default=False)
+
+
+class SolicitudParticipacion(Base):
+    """Pedido de compra o venta de participación en otro club, con DOS
+    aprobaciones secuenciales: primero tu propia directiva (gastar/aceptar
+    cobrar), después la directiva del club contraparte (ceder/recomprar la
+    participación) — ver engine/multiclub_engine.py::evaluar_directiva_propia
+    / evaluar_directiva_contraparte y _procesar_solicitudes_participacion en
+    main.py (llamado desde avanzar_dia)."""
+    __tablename__ = "solicitudes_participacion"
+
+    id_solicitud: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    id_partida: Mapped[int] = mapped_column(ForeignKey("partidas.id_partida"))
+    id_equipo_iniciador: Mapped[int] = mapped_column(ForeignKey("equipos.id_equipo"))
+    id_equipo_contraparte: Mapped[int] = mapped_column(ForeignKey("equipos.id_equipo"))
+    operacion: Mapped[str] = mapped_column(String(10), nullable=False)  # COMPRAR, VENDER
+    porcentaje: Mapped[int] = mapped_column(Integer, nullable=False)
+    monto: Mapped[int] = mapped_column(Integer, nullable=False)
+    fecha_solicitud: Mapped[date] = mapped_column(Date, nullable=False)
+    fecha_resolucion: Mapped[date] = mapped_column(Date, nullable=False)
+    fase: Mapped[str] = mapped_column(String(25), default="DIRECTIVA_PROPIA")  # DIRECTIVA_PROPIA, DIRECTIVA_CONTRAPARTE
+    estado: Mapped[str] = mapped_column(String(25), default="PENDIENTE")
+    # PENDIENTE, RECHAZADA_PROPIA, RECHAZADA_CONTRAPARTE, CONCRETADA
 
 
 class Jugador(Base):
@@ -156,11 +212,48 @@ class Jugador(Base):
     nacionalidad: Mapped[str] = mapped_column(String(40), default="Argentina")
     edad: Mapped[int] = mapped_column(Integer, default=20)
 
+    # Estos 4 son PROMEDIOS DERIVADOS de los atributos de abajo (se recalculan
+    # cada vez que cambia alguno de sus componentes, ver
+    # engine/data_gen.py::recalcular_derivados) — se mantienen como columnas
+    # propias porque overall/el motor de partido/las negociaciones/la IA de
+    # jugadores siguen leyendo estos 4 nomás, sin tocarse por esta ampliación.
     ataque: Mapped[int] = mapped_column(Integer, default=50)
     defensa: Mapped[int] = mapped_column(Integer, default=50)
     pase: Mapped[int] = mapped_column(Integer, default=50)
     fisico: Mapped[int] = mapped_column(Integer, default=50)
     potencial: Mapped[int] = mapped_column(Integer, default=65)
+
+    # Atributos detallados estilo FM, TODOS en escala 1-99 (no 1-20) para ser
+    # consistentes con el resto del juego. Técnico (alimentan ataque/defensa/
+    # pase derivados — ver fórmulas en data_gen.py):
+    finalizacion: Mapped[int] = mapped_column(Integer, default=50)
+    regate: Mapped[int] = mapped_column(Integer, default=50)
+    primer_toque: Mapped[int] = mapped_column(Integer, default=50)
+    centros: Mapped[int] = mapped_column(Integer, default=50)
+    cabeceo: Mapped[int] = mapped_column(Integer, default=50)
+    marcaje: Mapped[int] = mapped_column(Integer, default=50)
+    entradas: Mapped[int] = mapped_column(Integer, default=50)
+    tiros_lejanos: Mapped[int] = mapped_column(Integer, default=50)
+    # Mental — hoy son "de sabor" (se muestran en la ficha, no alimentan
+    # ningún cálculo todavía; salvo valentía y visión/decisiones, que sí
+    # entran en defensa/pase derivados).
+    agresividad: Mapped[int] = mapped_column(Integer, default=50)
+    valentia: Mapped[int] = mapped_column(Integer, default=50)
+    decisiones: Mapped[int] = mapped_column(Integer, default=50)
+    concentracion: Mapped[int] = mapped_column(Integer, default=50)
+    anticipacion: Mapped[int] = mapped_column(Integer, default=50)
+    compostura: Mapped[int] = mapped_column(Integer, default=50)
+    vision: Mapped[int] = mapped_column(Integer, default=50)
+    liderazgo: Mapped[int] = mapped_column(Integer, default=50)
+    # Físico (alimentan fisico derivado).
+    ritmo: Mapped[int] = mapped_column(Integer, default=50)
+    aceleracion: Mapped[int] = mapped_column(Integer, default=50)
+    resistencia: Mapped[int] = mapped_column(Integer, default=50)
+    fuerza: Mapped[int] = mapped_column(Integer, default=50)
+    agilidad: Mapped[int] = mapped_column(Integer, default=50)
+    # Portería: un solo atributo compuesto (no se desglosa en reflejos/juego
+    # de pies/colocación por separado) — solo relevante para POR.
+    porteria: Mapped[int] = mapped_column(Integer, default=50)
 
     energia: Mapped[int] = mapped_column(Integer, default=100)
     moral: Mapped[int] = mapped_column(Integer, default=75)
@@ -203,6 +296,25 @@ class Jugador(Base):
     id_equipo_dueno: Mapped[int | None] = mapped_column(ForeignKey("equipos.id_equipo"), nullable=True)
     fin_cesion: Mapped[date | None] = mapped_column(Date, nullable=True)
     opcion_compra: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+    # Precio de salida garantizado: cualquier club que ofrezca >= este monto
+    # se queda con el jugador sin negociación (ver /fichajes/ofertar). Se fija
+    # al renovar/precontrato/libre, como condición del jugador/representante.
+    clausula_rescision: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Reventa (sell-on): el club vendedor pide un % de lo que este jugador
+    # genere en su PRÓXIMA venta al aceptar una oferta recibida. Se consume
+    # (vuelve a None) apenas dispara una vez — ver _efectivizar_ofertas_pendientes.
+    id_club_reventa: Mapped[int | None] = mapped_column(ForeignKey("equipos.id_equipo"), nullable=True)
+    porcentaje_reventa: Mapped[int | None] = mapped_column(Integer, nullable=True)  # 1-100
+    # Partidos jugados con el club ACTUAL — se resetea a 0 en cada cambio de
+    # id_equipo. Solo existe para poder evaluar add-ons de transferencia
+    # (ver AddOnTransferencia y _calcular_efectos_fisicos).
+    partidos_club_actual: Mapped[int] = mapped_column(Integer, default=0)
+
+    # Foco de entrenamiento individual (OFENSIVO/DEFENSIVO/PASE/FISICO),
+    # además del plan grupal del equipo — progresa solo cada semana, ver
+    # _procesar_entrenamiento_individual.
+    foco_individual: Mapped[str | None] = mapped_column(String(12), nullable=True)
 
     equipo: Mapped["Equipo"] = relationship(back_populates="jugadores", foreign_keys=[id_equipo])
 
@@ -301,6 +413,9 @@ class Calendario(Base):
     jugado: Mapped[bool] = mapped_column(Boolean, default=False)
     goles_local: Mapped[int | None] = mapped_column(Integer, nullable=True)
     goles_visitante: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Charla post-partido: se puede dar una sola vez por fixture (ver
+    # POST /partidos/charla) — evita inflar moral repitiéndola.
+    charla_dada: Mapped[bool] = mapped_column(Boolean, default=False)
 
     # LIGA | COPA. Un fixture de copa no actualiza la tabla doméstica.
     tipo: Mapped[str] = mapped_column(String(10), default="LIGA")
@@ -342,6 +457,22 @@ class OfertaFichaje(Base):
     estado: Mapped[str] = mapped_column(String(20), default="PENDIENTE")  # PENDIENTE, ACEPTADA, RECHAZADA
     efectivizada: Mapped[bool] = mapped_column(Boolean, default=False)
     creado: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class AddOnTransferencia(Base):
+    """Pago extra pactado en una transferencia, atado a que el jugador sume
+    `partidos_objetivo` partidos jugados con el club comprador — se crea
+    junto al OfertaFichaje (ver /fichajes/negociar-contrato) y se cobra solo
+    cuando se cumple, procesando cada jornada (ver _calcular_efectos_fisicos
+    / _cerrar_jornada_del_dia en main.py)."""
+    __tablename__ = "addons_transferencia"
+
+    id_addon: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    id_jugador: Mapped[int] = mapped_column(ForeignKey("jugadores.id_jugador"))
+    id_equipo_beneficiario: Mapped[int] = mapped_column(ForeignKey("equipos.id_equipo"))  # vendedor original
+    partidos_objetivo: Mapped[int] = mapped_column(Integer)
+    monto: Mapped[int] = mapped_column(Integer)
+    cumplido: Mapped[bool] = mapped_column(Boolean, default=False)
 
 
 class HistorialTemporada(Base):

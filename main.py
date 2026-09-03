@@ -7,25 +7,26 @@ from formato import money
 
 from fastapi import FastAPI, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy import select, or_, update, delete, func
+from sqlalchemy import select, or_, and_, update, delete, func, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database import engine, Base, get_db
 from models import (
     Equipo, Jugador, Tactica, PlanEntrenamiento, Calendario, OfertaFichaje, Liga, Partida, Mensaje,
     HistorialTemporada, PaqueteClubes, EventoPartido, PersonalTecnico, Ojeador, ReporteScouting,
-    CicloTemporada, OfertaClubDT,
+    CicloTemporada, OfertaClubDT, AfiliacionClub, SolicitudParticipacion, AddOnTransferencia,
 )
 from schemas import (
-    EquipoOut, JugadorOut, LigaOut, TacticaIn, EntrenamientoIn,
+    EquipoOut, JugadorOut, LigaOut, TacticaIn, EntrenamientoIn, EntrenamientoIndividualIn, CapitanIn, CharlaEquipoIn,
     OfertaIn, RespuestaOfertaIn, SimularJornadaIn,
     RenovarContratoIn, PrecontratoIn, FicharLibreIn, NegociarContratoTraspasoIn,
     TransferibleIn, OfrecerJugadorIn, CederJugadorIn,
     CategoriaJugadorIn, IntakeDecidirIn, ReclutarJuvenilIn, ElegirDestinoDTIn,
+    OfertaParticipacionIn, MoverJugadorIn, InfluenciaIn,
 )
 from engine.match_engine import simulate_match
 from engine.transfer_engine import evaluar_oferta
-from engine.training_engine import aplicar_entrenamiento
+from engine.training_engine import aplicar_entrenamiento, recalcular_derivados_jugador, grupo_atributos
 from engine.season_engine import aplicar_desgaste, procesar_lesiones, procesar_fin_temporada, generar_regen
 from engine.ai_engine import ejecutar_ia_mercado
 from engine.transfer_window import ventana_activa, proxima_apertura
@@ -41,6 +42,7 @@ from engine.academia_engine import (
     generar_academia_completa, calcular_n_candidatos_intake,
 )
 from engine import directiva_engine
+from engine import multiclub_engine
 from engine.data_gen import objetivo_por_nivel, nivel_desde_reputacion, tope_salarial
 
 DIAS_ELEGIBLE_PRECONTRATO = 180
@@ -52,6 +54,25 @@ PROB_RENOVACION_IA = 0.75
 async def lifespan(app: FastAPI):
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+    # create_all crea tablas nuevas (como addons_transferencia) pero NO altera
+    # tablas que ya existían — no hay Alembic en este proyecto, así que las
+    # columnas nuevas sobre `jugadores` se agregan acá a mano. Cada ALTER va
+    # en su propia transacción: si ya existe (cualquier corrida después de la
+    # primera), esa sola falla y se descarta sin abortar ni afectar a las demás.
+    for stmt in (
+        "ALTER TABLE jugadores ADD COLUMN clausula_rescision INTEGER",
+        "ALTER TABLE jugadores ADD COLUMN id_club_reventa INTEGER",
+        "ALTER TABLE jugadores ADD COLUMN porcentaje_reventa INTEGER",
+        "ALTER TABLE jugadores ADD COLUMN partidos_club_actual INTEGER DEFAULT 0",
+        "ALTER TABLE jugadores ADD COLUMN foco_individual VARCHAR(12)",
+        "ALTER TABLE equipos ADD COLUMN id_capitan INTEGER",
+        "ALTER TABLE calendario ADD COLUMN charla_dada BOOLEAN DEFAULT 0",
+    ):
+        try:
+            async with engine.begin() as conn:
+                await conn.execute(text(stmt))
+        except Exception:
+            pass
     print("Base de datos lista.")
     yield
     await engine.dispose()
@@ -80,7 +101,116 @@ async def _fecha_actual(db: AsyncSession, id_partida: int) -> date:
     return partida.fecha_actual if partida else date.today()
 
 
-# ---------- ACADEMIA (plantel juvenil) ----------
+# ---------- MULTICLUB (bono de red, ver engine/multiclub_engine.py) ----------
+async def _bono_red_equipo(db: AsyncSession, equipo: Equipo) -> dict:
+    """Bono de red combinado del club a partir de su vínculo multiclub más
+    fuerte (participación accionaria o red de marca) — reemplaza el bono
+    que antes salía de nivel_* (infraestructura por niveles, descartada:
+    "no es real que existan niveles"). Para loops sobre muchos equipos a la
+    vez, usar _bonos_red_por_equipos en vez de esto (evita N+1)."""
+    relaciones = (await db.execute(
+        select(AfiliacionClub).where(
+            AfiliacionClub.id_partida == equipo.id_partida,
+            or_(AfiliacionClub.id_equipo_inversor == equipo.id_equipo,
+                AfiliacionClub.id_equipo_participado == equipo.id_equipo),
+        )
+    )).scalars().all()
+    candidatos = []
+    for r in relaciones:
+        if r.id_equipo_participado == equipo.id_equipo:
+            contraparte_id, rol = r.id_equipo_inversor, "PARTICIPADO"
+        else:
+            contraparte_id, rol = r.id_equipo_participado, "INVERSOR"
+        contraparte = await db.get(Equipo, contraparte_id)
+        if contraparte:
+            candidatos.append((r.tipo_relacion, rol, contraparte.reputacion))
+    if equipo.red_marca:
+        socio = (await db.execute(
+            select(Equipo).where(
+                Equipo.id_partida == equipo.id_partida, Equipo.red_marca == equipo.red_marca,
+                Equipo.id_equipo != equipo.id_equipo,
+            )
+        )).scalars().first()
+        if socio:
+            candidatos.append(("MARCA", "MARCA", socio.reputacion))
+    if not candidatos:
+        return multiclub_engine.bono_red(None, None, 0)
+    mejor = max(candidatos, key=lambda c: multiclub_engine.fuerza_relacion(*c))
+    return multiclub_engine.bono_red(*mejor)
+
+
+async def _bonos_red_por_equipos(db: AsyncSession, id_partida: int, equipo_ids: set[int]) -> dict[int, dict]:
+    """Versión batched de _bono_red_equipo: UNA consulta de AfiliacionClub
+    para toda la partida (la tabla es chica, no crece con jugadores) en vez
+    de 1-2 consultas por equipo dentro de un loop — mismo criterio que ya
+    usa el resto del código (equipos_ojeadores_por_id, etc.)."""
+    if not equipo_ids:
+        return {}
+    relaciones = (await db.execute(
+        select(AfiliacionClub).where(AfiliacionClub.id_partida == id_partida)
+    )).scalars().all()
+    ids_relevantes = set(equipo_ids)
+    for r in relaciones:
+        ids_relevantes.add(r.id_equipo_inversor)
+        ids_relevantes.add(r.id_equipo_participado)
+    equipos_por_id = {e.id_equipo: e for e in (
+        await db.execute(select(Equipo).where(Equipo.id_equipo.in_(ids_relevantes)))
+    ).scalars().all()}
+
+    candidatos_por_equipo: dict[int, list] = {eid: [] for eid in equipo_ids}
+    for r in relaciones:
+        if r.id_equipo_participado in candidatos_por_equipo:
+            contraparte = equipos_por_id.get(r.id_equipo_inversor)
+            if contraparte:
+                candidatos_por_equipo[r.id_equipo_participado].append((r.tipo_relacion, "PARTICIPADO", contraparte.reputacion))
+        if r.id_equipo_inversor in candidatos_por_equipo:
+            contraparte = equipos_por_id.get(r.id_equipo_participado)
+            if contraparte:
+                candidatos_por_equipo[r.id_equipo_inversor].append((r.tipo_relacion, "INVERSOR", contraparte.reputacion))
+
+    marcas_por_equipo: dict[str, list[Equipo]] = {}
+    for e in equipos_por_id.values():
+        if e.red_marca:
+            marcas_por_equipo.setdefault(e.red_marca, []).append(e)
+    for eid in equipo_ids:
+        equipo = equipos_por_id.get(eid)
+        if equipo and equipo.red_marca:
+            socios = [e for e in marcas_por_equipo.get(equipo.red_marca, []) if e.id_equipo != eid]
+            if socios:
+                candidatos_por_equipo[eid].append(("MARCA", "MARCA", socios[0].reputacion))
+
+    resultado = {}
+    for eid, candidatos in candidatos_por_equipo.items():
+        if not candidatos:
+            resultado[eid] = multiclub_engine.bono_red(None, None, 0)
+        else:
+            mejor = max(candidatos, key=lambda c: multiclub_engine.fuerza_relacion(*c))
+            resultado[eid] = multiclub_engine.bono_red(*mejor)
+    return resultado
+
+
+def _bono_centro(bono: dict | None) -> float:
+    return bono["bono_centro"] if bono else 0.0
+
+
+def _factor_medico(bono: dict | None) -> float:
+    """Multiplicador de riesgo de lesión (1.0 = sin efecto, hasta 0.4 = 60%
+    menos riesgo) — ver engine/injury_engine.py::evaluar_lesion."""
+    return bono["factor_medico"] if bono else 1.0
+
+
+def _bono_analitica(bono: dict | None) -> int:
+    return bono["bono_analitica"] if bono else 0
+
+
+def _bono_instalaciones_juveniles(bono: dict | None) -> float:
+    return bono["bono_instalaciones_juveniles"] if bono else 0.0
+
+
+def _bono_captacion_juvenil(bono: dict | None) -> int:
+    return bono["bono_captacion_juvenil"] if bono else 0
+
+
 async def _asegurar_academia(db: AsyncSession, equipo: Equipo) -> None:
     """Genera la Academia completa (60 jugadores, 15 por categoría) la
     primera vez que se mira este club — nada se genera en seed.py, así los
@@ -97,7 +227,9 @@ async def _asegurar_academia(db: AsyncSession, equipo: Equipo) -> None:
     plantel_primera = (await db.execute(
         select(Jugador).where(Jugador.id_equipo == equipo.id_equipo, Jugador.categoria == "PRIMERA")
     )).scalars().all()
-    factor = academia_engine.calcular_factor_desde_plantel(plantel_primera)
+    bono_red = await _bono_red_equipo(db, equipo)
+    bono_instalaciones = _bono_instalaciones_juveniles(bono_red)
+    factor = academia_engine.calcular_factor_desde_plantel(plantel_primera, bono_instalaciones)
     fecha = await _fecha_actual(db, equipo.id_partida)
     for datos in generar_academia_completa(pais, factor):
         _completar_contrato_juvenil(datos, fecha)
@@ -322,10 +454,40 @@ async def _efectivizar_ofertas_pendientes(db: AsyncSession, fecha: date, id_part
         vendedor.presupuesto_salarios = tope_salarial(vendedor.presupuesto_fichajes)
         jugador.id_equipo = comprador.id_equipo
         jugador.rol = "RESERVA"
+        jugador.partidos_club_actual = 0
         if oferta.salario_pactado:
             # Contrato nuevo pactado con el jugador como parte del traspaso.
             jugador.salario = oferta.salario_pactado
             jugador.fecha_fin_contrato = fecha + timedelta(days=365 * 3)
+
+        # Reventa (sell-on): si un club anterior se había quedado con un % de
+        # la PRÓXIMA venta de este jugador, se cobra acá — el guard contra
+        # vendedor.id_equipo evita que se pague a sí mismo en la venta donde
+        # lo pidió (recién seteado por responder_oferta, vendedor==id_club_reventa
+        # en ESA venta), y a la vez hace que el campo sobreviva sin tocarlo
+        # hasta que dispare de verdad en la venta siguiente.
+        if jugador.id_club_reventa and jugador.id_club_reventa != vendedor.id_equipo and jugador.porcentaje_reventa:
+            monto_reventa = round(oferta.monto_oferta * jugador.porcentaje_reventa / 100)
+            club_reventa = await db.get(Equipo, jugador.id_club_reventa)
+            if club_reventa and monto_reventa > 0:
+                club_reventa.presupuesto_fichajes += monto_reventa
+                vendedor.presupuesto_fichajes -= monto_reventa
+                if club_reventa.es_usuario:
+                    await _crear_mensaje(
+                        db, club_reventa.id_equipo, "Secretaría Técnica", f"Reventa de {jugador.nombre}",
+                        f"Por la cláusula de reventa que te reservaste, cobrás ${money(monto_reventa)} "
+                        f"({jugador.porcentaje_reventa}%) de la venta de {jugador.nombre} a {comprador.nombre}.",
+                        "MERCADO", fecha,
+                    )
+                if vendedor.es_usuario:
+                    await _crear_mensaje(
+                        db, vendedor.id_equipo, "Secretaría Técnica", f"Cláusula de reventa descontada",
+                        f"De los ${money(oferta.monto_oferta)} de la venta de {jugador.nombre}, "
+                        f"${money(monto_reventa)} van para {club_reventa.nombre} por la cláusula de reventa pactada.",
+                        "MERCADO", fecha,
+                    )
+            jugador.id_club_reventa = None
+            jugador.porcentaje_reventa = None
 
         if comprador.es_usuario:
             await _crear_mensaje(
@@ -337,6 +499,47 @@ async def _efectivizar_ofertas_pendientes(db: AsyncSession, fecha: date, id_part
             await _crear_mensaje(
                 db, vendedor.id_equipo, "Secretaría Técnica", f"Se concretó la venta de {jugador.nombre}",
                 f"{comprador.nombre} pagó ${money(oferta.monto_oferta)} por {jugador.nombre}.",
+                "MERCADO", fecha,
+            )
+
+
+async def _procesar_addons_cumplidos(db: AsyncSession, ids_jugadores_que_jugaron: set[int] | list[int], fecha: date) -> None:
+    """Se corre después de aplicar los efectos físicos de cada partido (ver
+    _calcular_efectos_fisicos/_aplicar_efectos_fisicos, que ya incrementaron
+    partidos_club_actual): revisa si algún AddOnTransferencia pendiente de
+    esos jugadores llegó a su objetivo y, si sí, paga."""
+    if not ids_jugadores_que_jugaron:
+        return
+    pendientes = (await db.execute(
+        select(AddOnTransferencia, Jugador)
+        .join(Jugador, AddOnTransferencia.id_jugador == Jugador.id_jugador)
+        .where(
+            AddOnTransferencia.cumplido.is_(False),
+            AddOnTransferencia.id_jugador.in_(ids_jugadores_que_jugaron),
+        )
+    )).all()
+    for addon, jugador in pendientes:
+        if jugador.partidos_club_actual < addon.partidos_objetivo or not jugador.id_equipo:
+            continue
+        addon.cumplido = True
+        club_pagador = await db.get(Equipo, jugador.id_equipo)
+        club_beneficiario = await db.get(Equipo, addon.id_equipo_beneficiario)
+        if not club_pagador or not club_beneficiario:
+            continue
+        club_pagador.presupuesto_fichajes -= addon.monto
+        club_beneficiario.presupuesto_fichajes += addon.monto
+        if club_pagador.es_usuario:
+            await _crear_mensaje(
+                db, club_pagador.id_equipo, "Secretaría Técnica", f"Add-on activado: {jugador.nombre}",
+                f"{jugador.nombre} llegó a los {addon.partidos_objetivo} partidos pactados — se le pagan "
+                f"${money(addon.monto)} a {club_beneficiario.nombre} por el add-on de su transferencia.",
+                "MERCADO", fecha,
+            )
+        if club_beneficiario.es_usuario:
+            await _crear_mensaje(
+                db, club_beneficiario.id_equipo, "Secretaría Técnica", f"Cobraste un add-on: {jugador.nombre}",
+                f"{jugador.nombre} llegó a los {addon.partidos_objetivo} partidos con {club_pagador.nombre} — "
+                f"cobrás ${money(addon.monto)} del add-on pactado en su transferencia.",
                 "MERCADO", fecha,
             )
 
@@ -497,6 +700,133 @@ async def _procesar_cesiones(db: AsyncSession, fecha: date, id_partida: int) -> 
                 )
 
 
+async def _upsert_afiliacion(db: AsyncSession, id_partida: int, id_inversor: int, id_participado: int, delta_porcentaje: int, fecha: date) -> None:
+    """Aplica delta_porcentaje (positivo=COMPRAR, negativo=VENDER) a la
+    AfiliacionClub del par (inversor, participado) — la crea si no existía,
+    la borra si el porcentaje llega a 0, y recalcula tipo_relacion según el
+    nuevo % (ver engine/multiclub_engine.py::tipo_relacion_por_porcentaje)."""
+    fila = (await db.execute(
+        select(AfiliacionClub).where(
+            AfiliacionClub.id_partida == id_partida,
+            AfiliacionClub.id_equipo_inversor == id_inversor,
+            AfiliacionClub.id_equipo_participado == id_participado,
+        )
+    )).scalars().first()
+    porcentaje_actual = fila.porcentaje if fila else 0
+    nuevo_porcentaje = max(0, min(100, porcentaje_actual + delta_porcentaje))
+    if nuevo_porcentaje <= 0:
+        if fila:
+            await db.delete(fila)
+        return
+    tipo = multiclub_engine.tipo_relacion_por_porcentaje(nuevo_porcentaje)
+    if fila:
+        fila.porcentaje = nuevo_porcentaje
+        fila.tipo_relacion = tipo
+    else:
+        db.add(AfiliacionClub(
+            id_partida=id_partida, id_equipo_inversor=id_inversor, id_equipo_participado=id_participado,
+            porcentaje=nuevo_porcentaje, tipo_relacion=tipo, fecha_adquisicion=fecha,
+        ))
+
+
+async def _procesar_solicitudes_participacion(db: AsyncSession, fecha: date, id_partida: int) -> None:
+    """Se corre en cada avance de día: resuelve SolicitudParticipacion
+    PENDIENTE cuya fecha_resolucion ya llegó, en DOS fases secuenciales.
+    FASE 1 (DIRECTIVA_PROPIA): tu propia directiva evalúa gastar/cobrar —
+    si aprueba, pasa a fase 2 con una nueva fecha_resolucion; si rechaza,
+    termina ahí (nunca molesta al club contraparte). FASE 2
+    (DIRECTIVA_CONTRAPARTE): la directiva del club objetivo (IA) evalúa si
+    acepta ceder/recomprar — si acepta, se mueve la plata y se actualiza
+    AfiliacionClub."""
+    pendientes = (await db.execute(
+        select(SolicitudParticipacion).where(
+            SolicitudParticipacion.id_partida == id_partida,
+            SolicitudParticipacion.estado == "PENDIENTE",
+            SolicitudParticipacion.fecha_resolucion <= fecha,
+        )
+    )).scalars().all()
+    if not pendientes:
+        return
+
+    ids_equipo = {s.id_equipo_iniciador for s in pendientes} | {s.id_equipo_contraparte for s in pendientes}
+    equipos_por_id: dict[int, Equipo] = {e.id_equipo: e for e in (
+        await db.execute(select(Equipo).where(Equipo.id_equipo.in_(ids_equipo)))
+    ).scalars().all()}
+    partida = await db.get(Partida, id_partida)
+    confianza = partida.confianza_directiva if partida else directiva_engine.CONFIANZA_INICIAL
+
+    for s in pendientes:
+        iniciador = equipos_por_id.get(s.id_equipo_iniciador)
+        contraparte = equipos_por_id.get(s.id_equipo_contraparte)
+        if not iniciador or not contraparte:
+            continue
+        nombre_op = "compra" if s.operacion == "COMPRAR" else "venta"
+
+        if s.fase == "DIRECTIVA_PROPIA":
+            veredicto = multiclub_engine.evaluar_directiva_propia(confianza, s.monto, iniciador.presupuesto_fichajes, s.operacion)
+            if veredicto["estado"] == "RECHAZADA":
+                s.estado = "RECHAZADA_PROPIA"
+                if iniciador.es_usuario:
+                    await _crear_mensaje(
+                        db, iniciador.id_equipo, "Directiva del Club", f"Operación rechazada: {contraparte.nombre}",
+                        f"Tu directiva rechazó la {nombre_op} de participación en {contraparte.nombre}. {veredicto['motivo']}",
+                        "SISTEMA", fecha,
+                    )
+                continue
+            s.fase = "DIRECTIVA_CONTRAPARTE"
+            s.fecha_resolucion = fecha + timedelta(days=multiclub_engine.dias_espera_directiva_contraparte(s.porcentaje))
+            if iniciador.es_usuario:
+                await _crear_mensaje(
+                    db, iniciador.id_equipo, "Directiva del Club", f"Operación en curso: {contraparte.nombre}",
+                    f"Tu directiva autorizó la {nombre_op} — ahora queda en manos de la directiva de {contraparte.nombre}, "
+                    f"respuesta estimada el {s.fecha_resolucion.strftime('%d/%m/%Y')}.",
+                    "SISTEMA", fecha,
+                )
+            continue
+
+        # FASE 2: DIRECTIVA_CONTRAPARTE
+        presupuesto_referencia_liga = await _presupuesto_referencia_liga(db, contraparte)
+        afiliacion_actual = (await db.execute(
+            select(AfiliacionClub).where(
+                AfiliacionClub.id_partida == id_partida,
+                AfiliacionClub.id_equipo_inversor == s.id_equipo_iniciador,
+                AfiliacionClub.id_equipo_participado == s.id_equipo_contraparte,
+            )
+        )).scalars().first()
+        porcentaje_actual = afiliacion_actual.porcentaje if afiliacion_actual else 0
+        delta = s.porcentaje if s.operacion == "COMPRAR" else -s.porcentaje
+        tipo_relevante = multiclub_engine.tipo_relacion_por_porcentaje(porcentaje_actual + delta) or "MINORITARIO"
+        veredicto = multiclub_engine.evaluar_directiva_contraparte(
+            contraparte.reputacion, contraparte.presupuesto_fichajes, presupuesto_referencia_liga, tipo_relevante, s.operacion,
+        )
+        if veredicto["estado"] == "RECHAZADA":
+            s.estado = "RECHAZADA_CONTRAPARTE"
+            if iniciador.es_usuario:
+                await _crear_mensaje(
+                    db, iniciador.id_equipo, "Directiva del Club", f"Operación rechazada: {contraparte.nombre}",
+                    f"La directiva de {contraparte.nombre} rechazó la {nombre_op}. {veredicto['motivo']}",
+                    "SISTEMA", fecha,
+                )
+            continue
+
+        if s.operacion == "COMPRAR":
+            iniciador.presupuesto_fichajes -= s.monto
+            contraparte.presupuesto_fichajes += s.monto
+        else:
+            contraparte.presupuesto_fichajes -= s.monto
+            iniciador.presupuesto_fichajes += s.monto
+        iniciador.presupuesto_salarios = tope_salarial(iniciador.presupuesto_fichajes)
+        contraparte.presupuesto_salarios = tope_salarial(contraparte.presupuesto_fichajes)
+        await _upsert_afiliacion(db, id_partida, s.id_equipo_iniciador, s.id_equipo_contraparte, delta, fecha)
+        s.estado = "CONCRETADA"
+        if iniciador.es_usuario:
+            await _crear_mensaje(
+                db, iniciador.id_equipo, "Directiva del Club", f"Operación concretada: {contraparte.nombre}",
+                f"Se concretó la {nombre_op} de {s.porcentaje}% de {contraparte.nombre} por ${money(s.monto)}.",
+                "SISTEMA", fecha,
+            )
+
+
 async def _procesar_progreso_scouting(db: AsyncSession, fecha: date, id_partida: int) -> None:
     """Se corre en cada avance de día: todo ojeador con un objetivo asignado
     suma progreso a su reporte, más rápido cuanto mejor sea su `calidad`."""
@@ -505,6 +835,8 @@ async def _procesar_progreso_scouting(db: AsyncSession, fecha: date, id_partida:
     )).scalars().all()
     if not ojeadores:
         return
+    ids_equipo_ojeadores = {o.id_equipo for o in ojeadores}
+    bonos_red_ojeadores = await _bonos_red_por_equipos(db, id_partida, ids_equipo_ojeadores)
     claves = {(o.id_equipo, o.id_jugador_asignado) for o in ojeadores}
     existentes = (await db.execute(
         select(ReporteScouting).where(
@@ -523,8 +855,49 @@ async def _procesar_progreso_scouting(db: AsyncSession, fecha: date, id_partida:
             reporte = ReporteScouting(id_equipo=o.id_equipo, id_jugador=o.id_jugador_asignado, id_partida=id_partida, progreso=0)
             db.add(reporte)
             reportes[clave] = reporte
-        reporte.progreso = min(100, reporte.progreso + max(1, o.calidad // 15))
+        # Bono de red multiclub: acelera el progreso de cualquier reporte en
+        # curso, sin importar quién sea el ojeador.
+        bono_analitica = _bono_analitica(bonos_red_ojeadores.get(o.id_equipo))
+        reporte.progreso = min(100, reporte.progreso + max(1, o.calidad // 15) + bono_analitica)
         reporte.fecha_ultimo_reporte = fecha
+
+
+PROB_MEJORA_INDIVIDUAL = 0.06
+COSTO_ENERGIA_INDIVIDUAL = 5
+
+
+async def _procesar_entrenamiento_individual(db: AsyncSession, fecha: date, id_partida: int) -> None:
+    """Se corre una vez por semana de juego (los lunes): todo jugador con un
+    `foco_individual` fijado tiene chance de mejorar algún atributo de ese
+    grupo, además de (e independiente de) lo que le toque por el plan de
+    entrenamiento grupal del equipo — ver aplicar_entrenamiento."""
+    if fecha.weekday() != 0:
+        return
+    jugadores = (await db.execute(
+        select(Jugador).where(
+            Jugador.id_partida == id_partida,
+            Jugador.foco_individual.is_not(None),
+            Jugador.categoria == "PRIMERA",
+            Jugador.edad < 29,
+            Jugador.id_equipo.is_not(None),
+        )
+    )).scalars().all()
+    if not jugadores:
+        return
+    bonos_red = await _bonos_red_por_equipos(db, id_partida, {j.id_equipo for j in jugadores})
+    for j in jugadores:
+        grupo = grupo_atributos(j.foco_individual)
+        if not grupo:
+            continue
+        prob = PROB_MEJORA_INDIVIDUAL + _bono_centro(bonos_red.get(j.id_equipo))
+        cambio = False
+        for atributo in grupo:
+            if random.random() < prob and getattr(j, atributo) < j.potencial:
+                setattr(j, atributo, min(j.potencial, getattr(j, atributo) + 1))
+                cambio = True
+        if cambio:
+            recalcular_derivados_jugador(j)
+        j.energia = max(0, j.energia - COSTO_ENERGIA_INDIVIDUAL)
 
 
 CONFEDERACIONES = ["UEFA", "CONMEBOL"]
@@ -618,16 +991,21 @@ async def _procesar_fin_temporada_confederacion(db: AsyncSession, fecha: date, i
         else:
             jugadores_primera_por_club.setdefault(j.id_equipo, []).append(j)
 
+    bonos_red = await _bonos_red_por_equipos(db, id_partida, set(ids_equipo))
     for equipo_academia in equipos:
         academia_club = jugadores_academia_por_club.get(equipo_academia.id_equipo)
         if not academia_club:
             continue
         liga_club = next((l for l in ligas if l.id_liga == equipo_academia.id_liga), None)
         pais_club = liga_club.pais if liga_club else "Argentina"
-        factor_club = academia_engine.calcular_factor_desde_plantel(jugadores_primera_por_club.get(equipo_academia.id_equipo, []))
+        bono_red_club = bonos_red.get(equipo_academia.id_equipo)
+        factor_club = academia_engine.calcular_factor_desde_plantel(
+            jugadores_primera_por_club.get(equipo_academia.id_equipo, []), _bono_instalaciones_juveniles(bono_red_club),
+        )
+        bono_captacion = _bono_captacion_juvenil(bono_red_club)
         for categoria_intake in ("SUB13", "SUB15", "SUB18"):
             cantidad_actual = sum(1 for j in academia_club if j.categoria == categoria_intake)
-            n_candidatos = calcular_n_candidatos_intake(cantidad_actual)
+            n_candidatos = calcular_n_candidatos_intake(cantidad_actual, bono_captacion)
             faltaban = cantidad_actual < academia_engine.TAMANIO_MINIMO_CATEGORIA
             for _ in range(n_candidatos):
                 pos = random.choice(["POR", "DEF", "MED", "DEL"])
@@ -870,6 +1248,7 @@ async def _procesar_partidos_ajenos_del_dia(db: AsyncSession, fecha: date, id_pa
     jugadores_por_equipo: dict[int, list[Jugador]] = {}
     for j in (await db.execute(select(Jugador).where(Jugador.id_equipo.in_(ids_equipos)))).scalars().all():
         jugadores_por_equipo.setdefault(j.id_equipo, []).append(j)
+    bonos_red = await _bonos_red_por_equipos(db, id_partida, ids_equipos)
 
     for f in pendientes:
         local = equipos_por_id.get(f.id_local)
@@ -886,10 +1265,18 @@ async def _procesar_partidos_ajenos_del_dia(db: AsyncSession, fecha: date, id_pa
                         "ataque": p.ataque, "defensa": p.defensa, "energia": p.energia, "duty": p.duty} for p in jl]
         dict_visit = [{"id_jugador": p.id_jugador, "nombre": p.nombre, "posicion": p.posicion,
                         "ataque": p.ataque, "defensa": p.defensa, "energia": p.energia, "duty": p.duty} for p in jv]
+        _aplicar_vestuario(dict_local, plantel_local, local.id_capitan)
+        _aplicar_vestuario(dict_visit, plantel_visit, visit.id_capitan)
         tac_local_dict = {"formacion": tac_local.formacion, "mentalidad": tac_local.mentalidad, "presion": tac_local.presion}
         tac_visit_dict = {"formacion": tac_visit.formacion, "mentalidad": tac_visit.mentalidad, "presion": tac_visit.presion}
-        resultado = simulate_match(dict_local, dict_visit, tac_local_dict, tac_visit_dict, ia_local=True, ia_visit=True)
-        _aplicar_efectos_fisicos(jl, jv, plantel_local, plantel_visit, resultado)
+        fm_local = _factor_medico(bonos_red.get(f.id_local))
+        fm_visit = _factor_medico(bonos_red.get(f.id_visitante))
+        resultado = simulate_match(
+            dict_local, dict_visit, tac_local_dict, tac_visit_dict, ia_local=True, ia_visit=True,
+            factor_medico_local=fm_local, factor_medico_visit=fm_visit,
+        )
+        _aplicar_efectos_fisicos(jl, jv, plantel_local, plantel_visit, resultado, fm_local, fm_visit)
+        await _procesar_addons_cumplidos(db, {p.id_jugador for p in jl + jv}, fecha)
         f.jugado = True
         f.goles_local = resultado["gh"]
         f.goles_visitante = resultado["gv"]
@@ -959,6 +1346,8 @@ async def avanzar_dia(id_partida: int, db: AsyncSession = Depends(get_db)):
     await _procesar_contratos(db, estado.fecha_actual, id_partida)
     await _procesar_cesiones(db, estado.fecha_actual, id_partida)
     await _procesar_progreso_scouting(db, estado.fecha_actual, id_partida)
+    await _procesar_entrenamiento_individual(db, estado.fecha_actual, id_partida)
+    await _procesar_solicitudes_participacion(db, estado.fecha_actual, id_partida)
     await _procesar_arranques_diferidos(db, estado.fecha_actual, id_partida)
     await _procesar_partidos_ajenos_del_dia(db, estado.fecha_actual, id_partida, equipo_usuario)
     await db.commit()
@@ -1017,6 +1406,8 @@ async def simular_hasta(id_partida: int, datos: dict, db: AsyncSession = Depends
         await _procesar_contratos(db, estado.fecha_actual, id_partida)
         await _procesar_cesiones(db, estado.fecha_actual, id_partida)
         await _procesar_progreso_scouting(db, estado.fecha_actual, id_partida)
+        await _procesar_entrenamiento_individual(db, estado.fecha_actual, id_partida)
+        await _procesar_solicitudes_participacion(db, estado.fecha_actual, id_partida)
         await _procesar_arranques_diferidos(db, estado.fecha_actual, id_partida)
         await _procesar_partidos_ajenos_del_dia(db, estado.fecha_actual, id_partida, equipo_usuario)
     else:
@@ -1397,6 +1788,37 @@ def _once_titular(plantel: list[Jugador]) -> list[Jugador]:
     return titulares + suplentes[:11 - len(titulares)]
 
 
+MULTIPLICADOR_VESTUARIO_MIN = 0.95
+MULTIPLICADOR_VESTUARIO_RANGO = 0.10
+ATENUACION_LIDERAZGO_CAPITAN = 0.4
+
+
+def _puntaje_vestuario(plantel: list[Jugador], id_capitan: int | None) -> float:
+    """Dinámica de vestuario (0-100): moral promedio del plantel PRIMERA,
+    penalizada si el plantel está muy dividido de ánimo (desviación
+    estándar alta) — un capitán con buen liderazgo atenúa ese castigo."""
+    morales = [j.moral for j in plantel if j.categoria == "PRIMERA"]
+    if not morales:
+        return 75.0
+    promedio = sum(morales) / len(morales)
+    varianza = sum((m - promedio) ** 2 for m in morales) / len(morales)
+    desviacion = varianza ** 0.5
+    capitan = next((j for j in plantel if j.id_jugador == id_capitan), None) if id_capitan else None
+    atenuacion = 1 - (capitan.liderazgo / 100 * ATENUACION_LIDERAZGO_CAPITAN) if capitan else 1.0
+    return max(0.0, min(100.0, promedio - desviacion * atenuacion))
+
+
+def _aplicar_vestuario(dict_equipo: list[dict], plantel: list[Jugador], id_capitan: int | None) -> None:
+    """Traduce el puntaje de vestuario en un multiplicador chico y parejo
+    de ataque/defensa para todo el equipo — a diferencia del marcaje
+    (ver _aplicar_marcaje), esto es una condición estructural del club:
+    corre en TODOS sus partidos, no solo en los que mira el usuario."""
+    mult = MULTIPLICADOR_VESTUARIO_MIN + (_puntaje_vestuario(plantel, id_capitan) / 100) * MULTIPLICADOR_VESTUARIO_RANGO
+    for p in dict_equipo:
+        p["ataque"] = round(p["ataque"] * mult)
+        p["defensa"] = round(p["defensa"] * mult)
+
+
 # ---------- HELPER: ARMAR ALINEACIÓN Y DATOS PARA SIMULAR ----------
 async def _preparar_lineup(db: AsyncSession, fixture: Calendario):
     local = await db.get(Equipo, fixture.id_local)
@@ -1414,6 +1836,8 @@ async def _preparar_lineup(db: AsyncSession, fixture: Calendario):
                     "ataque": p.ataque, "defensa": p.defensa, "energia": p.energia, "duty": p.duty} for p in jl]
     dict_visit = [{"id_jugador": p.id_jugador, "nombre": p.nombre, "posicion": p.posicion,
                     "ataque": p.ataque, "defensa": p.defensa, "energia": p.energia, "duty": p.duty} for p in jv]
+    _aplicar_vestuario(dict_local, plantel_local, local.id_capitan)
+    _aplicar_vestuario(dict_visit, plantel_visit, visit.id_capitan)
 
     tac_local_dict = {"formacion": tac_local.formacion, "mentalidad": tac_local.mentalidad, "presion": tac_local.presion}
     tac_visit_dict = {"formacion": tac_visit.formacion, "mentalidad": tac_visit.mentalidad, "presion": tac_visit.presion}
@@ -1421,7 +1845,47 @@ async def _preparar_lineup(db: AsyncSession, fixture: Calendario):
     return local, visit, plantel_local, plantel_visit, jl, jv, dict_local, dict_visit, tac_local_dict, tac_visit_dict
 
 
-def _calcular_efectos_fisicos(plantel_local: list[Jugador], plantel_visit: list[Jugador], resultado: dict) -> list[dict]:
+PENALIDAD_ATAQUE_MARCADO = 0.65
+PENALIDAD_DEFENSA_MARCADOR = 0.98
+
+
+def _aplicar_marcaje(dict_local: list[dict], dict_visit: list[dict], id_jugador_marcado: int | None) -> None:
+    """Instrucción de rival: marcar de cerca a UN jugador rival (DEL/MED)
+    para el próximo partido — reduce su aporte de ataque (y por lo tanto
+    su chance de ser goleador, ver _pick_scorer) a costa de un poco de
+    solidez defensiva pareja en todo el equipo que lo marca, por
+    reacomodarse para seguirlo. No persiste nada: es una elección efímera
+    del usuario para su próximo partido, mandada como parámetro al armar
+    la simulación. Si el jugador marcado no está en ninguna de las dos
+    listas (se transfirió, no es titular, etc.), no hace nada."""
+    if not id_jugador_marcado:
+        return
+    for equipo_marcado, equipo_marcador in ((dict_visit, dict_local), (dict_local, dict_visit)):
+        objetivo = next((p for p in equipo_marcado if p["id_jugador"] == id_jugador_marcado), None)
+        if objetivo:
+            objetivo["ataque"] = round(objetivo["ataque"] * PENALIDAD_ATAQUE_MARCADO)
+            for p in equipo_marcador:
+                p["defensa"] = round(p["defensa"] * PENALIDAD_DEFENSA_MARCADOR)
+            return
+
+
+TONOS_CHARLA = {"EFUSIVA": 0, "CALMA": 1, "EXIGENTE": 2}
+INDICE_CORRECTO_CHARLA = {"PERDIO": 0, "EMPATO": 1, "GANO": 2}
+DELTA_POR_DISTANCIA_CHARLA = {0: 4, 1: 1, 2: -3}
+
+
+def _delta_charla(tono: str, resultado: str) -> int:
+    """Charla post-partido: EFUSIVA es lo que corresponde si se perdió,
+    CALMA si empató, EXIGENTE si ganó — cuanto más lejos el tono elegido
+    del que corresponde, peor el efecto (puede hasta bajar la moral)."""
+    distancia = abs(TONOS_CHARLA[tono] - INDICE_CORRECTO_CHARLA[resultado])
+    return DELTA_POR_DISTANCIA_CHARLA[distancia]
+
+
+def _calcular_efectos_fisicos(
+    plantel_local: list[Jugador], plantel_visit: list[Jugador], resultado: dict,
+    factor_medico_local: float = 1.0, factor_medico_visit: float = 1.0,
+) -> list[dict]:
     """Calcula desgaste + lesiones nuevas + recuperación de lesiones previas
     + ajuste de moral para los planteles de ambos equipos, SIN tocar los
     objetos ORM — devuelve una lista de dicts listos para un UPDATE masivo
@@ -1452,7 +1916,11 @@ def _calcular_efectos_fisicos(plantel_local: list[Jugador], plantel_visit: list[
             les = lesionados_ahora[j.id_jugador]
             nuevo_lesionado, nuevo_tipo, nuevas_semanas = True, les["tipo"], les["semanas"]
         elif j.lesionado:
-            nuevas_semanas = j.semanas_lesion - 1
+            # El Centro Médico acelera la recuperación: hasta ~3x más rápido
+            # en nivel 20 (factor_medico llega a 0.4, ver _factor_medico).
+            factor_medico = factor_medico_local if j.id_jugador in ids_local else factor_medico_visit
+            paso_recuperacion = max(1, round(1 + (1 - factor_medico) * 3))
+            nuevas_semanas = j.semanas_lesion - paso_recuperacion
             if nuevas_semanas <= 0:
                 nuevo_lesionado, nuevo_tipo, nuevas_semanas = False, None, 0
         jugo = j.id_jugador in energia_gastada
@@ -1462,6 +1930,7 @@ def _calcular_efectos_fisicos(plantel_local: list[Jugador], plantel_visit: list[
             "id_jugador": j.id_jugador, "energia": nueva_energia,
             "lesionado": nuevo_lesionado, "tipo_lesion": nuevo_tipo, "semanas_lesion": nuevas_semanas,
             "moral": nueva_moral,
+            "partidos_club_actual": (j.partidos_club_actual + 1) if jugo else j.partidos_club_actual,
         })
     return updates
 
@@ -1485,17 +1954,20 @@ def _calcular_update_equipo(equipo: Equipo, goles_favor: int, goles_contra: int)
     }
 
 
-def _aplicar_efectos_fisicos(jl, jv, plantel_local, plantel_visit, resultado) -> None:
+def _aplicar_efectos_fisicos(
+    jl, jv, plantel_local, plantel_visit, resultado, factor_medico_local: float = 1.0, factor_medico_visit: float = 1.0,
+) -> None:
     """Igual que _calcular_efectos_fisicos pero mutando los objetos ORM
     directamente — se usa para UN solo partido (el del usuario, o el modo
     "jugar en vivo"), donde la cantidad de filas es chica y no vale la pena
     la complejidad del camino de UPDATE masivo."""
-    updates = _calcular_efectos_fisicos(plantel_local, plantel_visit, resultado)
+    updates = _calcular_efectos_fisicos(plantel_local, plantel_visit, resultado, factor_medico_local, factor_medico_visit)
     updates_por_id = {u["id_jugador"]: u for u in updates}
     for j in plantel_local + plantel_visit:
         u = updates_por_id[j.id_jugador]
         j.energia, j.lesionado, j.tipo_lesion, j.semanas_lesion = u["energia"], u["lesionado"], u["tipo_lesion"], u["semanas_lesion"]
         j.moral = u["moral"]
+        j.partidos_club_actual = u["partidos_club_actual"]
 
 
 async def _finalizar_fixture(db: AsyncSession, fixture: Calendario, local: Equipo, visit: Equipo, gh: int, gv: int) -> None:
@@ -1542,8 +2014,9 @@ async def _finalizar_fixture(db: AsyncSession, fixture: Calendario, local: Equip
 
 
 # ---------- HELPER: JUGAR UN FIXTURE COMPLETO (simulación rápida) ----------
-async def _jugar_fixture(db: AsyncSession, fixture: Calendario) -> dict:
+async def _jugar_fixture(db: AsyncSession, fixture: Calendario, id_jugador_marcado: int | None = None) -> dict:
     local, visit, plantel_local, plantel_visit, jl, jv, dict_local, dict_visit, tac_local_dict, tac_visit_dict = await _preparar_lineup(db, fixture)
+    _aplicar_marcaje(dict_local, dict_visit, id_jugador_marcado)
     return await _simular_y_finalizar(db, fixture, local, visit, plantel_local, plantel_visit, jl, jv, dict_local, dict_visit, tac_local_dict, tac_visit_dict)
 
 
@@ -1555,13 +2028,17 @@ async def _simular_y_finalizar(
     """Núcleo de simular-un-fixture sin leer nada de la base — se usa tanto
     para el partido puntual del usuario (una consulta más arriba) como para
     resolver en lote el resto de la jornada (datos ya precargados)."""
+    fm_local = _factor_medico(await _bono_red_equipo(db, local))
+    fm_visit = _factor_medico(await _bono_red_equipo(db, visit))
     resultado = simulate_match(
         dict_local, dict_visit, tac_local_dict, tac_visit_dict,
         ia_local=not local.es_usuario,
         ia_visit=not visit.es_usuario,
+        factor_medico_local=fm_local, factor_medico_visit=fm_visit,
     )
 
-    _aplicar_efectos_fisicos(jl, jv, plantel_local, plantel_visit, resultado)
+    _aplicar_efectos_fisicos(jl, jv, plantel_local, plantel_visit, resultado, fm_local, fm_visit)
+    await _procesar_addons_cumplidos(db, {p.id_jugador for p in jl + jv}, fixture.fecha)
     await _finalizar_fixture(db, fixture, local, visit, resultado["gh"], resultado["gv"])
 
     return {
@@ -1587,7 +2064,7 @@ async def simular_partido(datos: dict, db: AsyncSession = Depends(get_db)):
     if not fixture:
         raise HTTPException(status_code=404, detail="No hay un partido pendiente entre esos equipos.")
 
-    resultado = await _jugar_fixture(db, fixture)
+    resultado = await _jugar_fixture(db, fixture, datos.get("id_jugador_marcado"))
     resultado["mercado_ia"], resultado["nueva_temporada"] = await _cerrar_jornada_del_dia(db, fixture)
     await db.commit()
     return resultado
@@ -1623,6 +2100,7 @@ async def _cerrar_jornada_del_dia(db: AsyncSession, fixture: Calendario) -> tupl
         jugadores_por_equipo: dict[int, list[Jugador]] = {}
         for j in (await db.execute(select(Jugador).where(Jugador.id_equipo.in_(ids_equipos)))).scalars().all():
             jugadores_por_equipo.setdefault(j.id_equipo, []).append(j)
+        bonos_red = await _bonos_red_por_equipos(db, id_partida, ids_equipos)
 
         # Se calcula todo en memoria (nada de mutar objetos ORM acá) y se
         # manda como 3 UPDATE masivos al final — mutar ~2000 objetos uno por
@@ -1632,6 +2110,7 @@ async def _cerrar_jornada_del_dia(db: AsyncSession, fixture: Calendario) -> tupl
         updates_jugador: list[dict] = []
         updates_equipo: list[dict] = []
         updates_fixture: list[dict] = []
+        ids_jugaron_lote: set[int] = set()
 
         for otro in otros_pendientes:
             local = equipos_por_id.get(otro.id_local)
@@ -1648,14 +2127,22 @@ async def _cerrar_jornada_del_dia(db: AsyncSession, fixture: Calendario) -> tupl
                             "ataque": p.ataque, "defensa": p.defensa, "energia": p.energia, "duty": p.duty} for p in jl]
             dict_visit = [{"id_jugador": p.id_jugador, "nombre": p.nombre, "posicion": p.posicion,
                             "ataque": p.ataque, "defensa": p.defensa, "energia": p.energia, "duty": p.duty} for p in jv]
+            _aplicar_vestuario(dict_local, plantel_local, local.id_capitan)
+            _aplicar_vestuario(dict_visit, plantel_visit, visit.id_capitan)
             tac_local_dict = {"formacion": tac_local.formacion, "mentalidad": tac_local.mentalidad, "presion": tac_local.presion}
             tac_visit_dict = {"formacion": tac_visit.formacion, "mentalidad": tac_visit.mentalidad, "presion": tac_visit.presion}
 
+            fm_local = _factor_medico(bonos_red.get(otro.id_local))
+            fm_visit = _factor_medico(bonos_red.get(otro.id_visitante))
             resultado = simulate_match(
                 dict_local, dict_visit, tac_local_dict, tac_visit_dict,
                 ia_local=not local.es_usuario, ia_visit=not visit.es_usuario,
+                factor_medico_local=fm_local, factor_medico_visit=fm_visit,
             )
-            updates_jugador.extend(_calcular_efectos_fisicos(plantel_local, plantel_visit, resultado))
+            updates_jugador.extend(_calcular_efectos_fisicos(
+                plantel_local, plantel_visit, resultado, fm_local, fm_visit,
+            ))
+            ids_jugaron_lote.update(p.id_jugador for p in jl + jv)
             if otro.tipo == "LIGA":
                 updates_equipo.append(_calcular_update_equipo(local, resultado["gh"], resultado["gv"]))
                 updates_equipo.append(_calcular_update_equipo(visit, resultado["gv"], resultado["gh"]))
@@ -1666,6 +2153,7 @@ async def _cerrar_jornada_del_dia(db: AsyncSession, fixture: Calendario) -> tupl
 
         if updates_jugador:
             await db.execute(update(Jugador), updates_jugador)
+            await _procesar_addons_cumplidos(db, ids_jugaron_lote, fixture.fecha)
         if updates_equipo:
             await db.execute(update(Equipo), updates_equipo)
         if updates_fixture:
@@ -1696,11 +2184,14 @@ async def simular_primer_tiempo(datos: dict, db: AsyncSession = Depends(get_db))
         raise HTTPException(status_code=404, detail="No hay un partido pendiente entre esos equipos.")
 
     local, visit, plantel_local, plantel_visit, jl, jv, dict_local, dict_visit, tac_local_dict, tac_visit_dict = await _preparar_lineup(db, fixture)
+    _aplicar_marcaje(dict_local, dict_visit, datos.get("id_jugador_marcado"))
 
     resultado = simulate_match(
         dict_local, dict_visit, tac_local_dict, tac_visit_dict,
         ia_local=not local.es_usuario, ia_visit=not visit.es_usuario,
         minuto_inicio=1, minuto_fin=45,
+        factor_medico_local=_factor_medico(await _bono_red_equipo(db, local)),
+        factor_medico_visit=_factor_medico(await _bono_red_equipo(db, visit)),
     )
     # El desgaste y las lesiones del primer tiempo se aplican ya mismo — así,
     # si hay que hacer cambios en el entretiempo, reflejan la realidad del
@@ -1738,14 +2229,19 @@ async def simular_segundo_tiempo(datos: dict, db: AsyncSession = Depends(get_db)
     # Se vuelve a armar la alineación acá — si el usuario hizo cambios en el
     # entretiempo (tácticas, titulares), el segundo tiempo ya sale con eso.
     local, visit, plantel_local, plantel_visit, jl, jv, dict_local, dict_visit, tac_local_dict, tac_visit_dict = await _preparar_lineup(db, fixture)
+    _aplicar_marcaje(dict_local, dict_visit, datos.get("id_jugador_marcado"))
 
+    fm_local = _factor_medico(await _bono_red_equipo(db, local))
+    fm_visit = _factor_medico(await _bono_red_equipo(db, visit))
     resultado = simulate_match(
         dict_local, dict_visit, tac_local_dict, tac_visit_dict,
         ia_local=not local.es_usuario, ia_visit=not visit.es_usuario,
         minuto_inicio=46, minuto_fin=90, gh_inicial=gh_medio, gv_inicial=gv_medio,
+        factor_medico_local=fm_local, factor_medico_visit=fm_visit,
     )
 
-    _aplicar_efectos_fisicos(jl, jv, plantel_local, plantel_visit, resultado)
+    _aplicar_efectos_fisicos(jl, jv, plantel_local, plantel_visit, resultado, fm_local, fm_visit)
+    await _procesar_addons_cumplidos(db, {p.id_jugador for p in jl + jv}, fixture.fecha)
     await _finalizar_fixture(db, fixture, local, visit, resultado["gh"], resultado["gv"])
     log_ia, nueva_temporada = await _cerrar_jornada_del_dia(db, fixture)
 
@@ -1758,6 +2254,48 @@ async def simular_segundo_tiempo(datos: dict, db: AsyncSession = Depends(get_db)
         "mercado_ia": log_ia,
         "nueva_temporada": nueva_temporada,
     }
+
+
+# ---------- CHARLA POST-PARTIDO ----------
+@app.post("/partidos/charla", tags=["Simulación"])
+async def charla_equipo(datos: CharlaEquipoIn, db: AsyncSession = Depends(get_db)):
+    if datos.tono not in TONOS_CHARLA:
+        raise HTTPException(status_code=400, detail=f"Tono inválido, debe ser uno de {sorted(TONOS_CHARLA)}.")
+    fixture = await db.get(Calendario, datos.id_fixture)
+    if not fixture:
+        raise HTTPException(status_code=404, detail="Partido no encontrado")
+    if not fixture.jugado:
+        raise HTTPException(status_code=400, detail="Todavía no se jugó este partido.")
+    if fixture.charla_dada:
+        raise HTTPException(status_code=400, detail="Ya se le dio la charla post-partido a este equipo.")
+
+    if fixture.id_local == datos.id_equipo:
+        goles_propios, goles_rivales = fixture.goles_local, fixture.goles_visitante
+    elif fixture.id_visitante == datos.id_equipo:
+        goles_propios, goles_rivales = fixture.goles_visitante, fixture.goles_local
+    else:
+        raise HTTPException(status_code=400, detail="Ese equipo no jugó este partido.")
+
+    resultado = "GANO" if goles_propios > goles_rivales else "PERDIO" if goles_propios < goles_rivales else "EMPATO"
+    delta = _delta_charla(datos.tono, resultado)
+
+    jugadores = (await db.execute(
+        select(Jugador).where(Jugador.id_equipo == datos.id_equipo, Jugador.categoria == "PRIMERA")
+    )).scalars().all()
+    for j in jugadores:
+        j.moral = max(0, min(100, j.moral + delta))
+
+    fixture.charla_dada = True
+    fecha = await _fecha_actual(db, fixture.id_partida)
+    tono_texto = {"EFUSIVA": "efusiva", "CALMA": "calma", "EXIGENTE": "exigente"}[datos.tono]
+    signo = "+" if delta >= 0 else ""
+    await _crear_mensaje(
+        db, datos.id_equipo, "Cuerpo Técnico", "Charla post-partido",
+        f"Le diste una charla {tono_texto} al plantel — el efecto en la moral fue de {signo}{delta}.",
+        "ENTRENAMIENTO", fecha,
+    )
+    await db.commit()
+    return {"status": "ok", "delta": delta, "resultado": resultado}
 
 
 # ---------- SIMULAR JORNADA COMPLETA ----------
@@ -1833,9 +2371,10 @@ async def configurar_entrenamiento(datos: EntrenamientoIn, db: AsyncSession = De
     jugadores = (await db.execute(
         select(Jugador).where(Jugador.id_equipo == datos.id_equipo, Jugador.categoria == "PRIMERA")
     )).scalars().all()
-    aplicar_entrenamiento(jugadores, datos.foco, datos.intensidad)
-
     equipo = await db.get(Equipo, datos.id_equipo)
+    bono_centro = _bono_centro(await _bono_red_equipo(db, equipo)) if equipo else 0.0
+    aplicar_entrenamiento(jugadores, datos.foco, datos.intensidad, bono_centro)
+
     fecha = await _fecha_actual(db, equipo.id_partida)
     await _crear_mensaje(
         db, datos.id_equipo, "Cuerpo Técnico", "Plan de entrenamiento actualizado",
@@ -1845,6 +2384,32 @@ async def configurar_entrenamiento(datos: EntrenamientoIn, db: AsyncSession = De
 
     await db.commit()
     return {"status": "ok", "mensaje": f"Entrenamiento configurado en modo {datos.foco}/{datos.intensidad}"}
+
+
+FOCOS_INDIVIDUALES_VALIDOS = {"OFENSIVO", "DEFENSIVO", "PASE", "FISICO"}
+
+
+@app.post("/entrenamiento/individual", tags=["Entrenamiento"])
+async def configurar_entrenamiento_individual(datos: EntrenamientoIndividualIn, db: AsyncSession = Depends(get_db)):
+    """Foco extra propio de UN jugador, además del plan grupal de su equipo
+    — progresa solo cada semana, ver _procesar_entrenamiento_individual."""
+    if datos.foco is not None and datos.foco not in FOCOS_INDIVIDUALES_VALIDOS:
+        raise HTTPException(status_code=400, detail=f"Foco inválido, debe ser uno de {sorted(FOCOS_INDIVIDUALES_VALIDOS)} o null.")
+    jugador = await db.get(Jugador, datos.id_jugador)
+    if not jugador:
+        raise HTTPException(status_code=404, detail="Jugador no encontrado")
+    jugador.foco_individual = datos.foco
+
+    if jugador.id_equipo:
+        fecha = await _fecha_actual(db, jugador.id_partida)
+        mensaje = (
+            f"Se asignó a {jugador.nombre} un foco de entrenamiento individual en {datos.foco}."
+            if datos.foco else f"Se quitó el foco de entrenamiento individual de {jugador.nombre}."
+        )
+        await _crear_mensaje(db, jugador.id_equipo, "Cuerpo Técnico", "Entrenamiento individual actualizado", mensaje, "ENTRENAMIENTO", fecha)
+
+    await db.commit()
+    return {"status": "ok", "foco_individual": jugador.foco_individual}
 
 
 # ---------- MERCADO: LISTAR JUGADORES DISPONIBLES (de otros equipos, todas las ligas, + libres) ----------
@@ -2037,6 +2602,18 @@ async def ofertar_fichaje(datos: OfertaIn, db: AsyncSession = Depends(get_db)):
                 "mensaje": f"La FIFA prohíbe transferencias internacionales de menores de 18 — {pais_vendedor} → {pais_comprador}.",
             }
 
+    # Cláusula de rescisión: el club no puede negarse si se paga el monto
+    # completo — se salta evaluar_oferta (rondas, demanda, intransferible)
+    # por completo, sea cual sea la ronda.
+    if jugador.clausula_rescision and datos.monto_oferta >= jugador.clausula_rescision:
+        if comprador.presupuesto_fichajes < jugador.clausula_rescision:
+            return {"estado": "RECHAZADA", "mensaje": "No tenés presupuesto suficiente."}
+        return {
+            "estado": "ACEPTADA_CLUB",
+            "mensaje": f"Pagaste la cláusula de rescisión (${money(jugador.clausula_rescision)}) — el club no puede negarse.",
+            "monto_acordado": jugador.clausula_rescision,
+        }
+
     resultado = evaluar_oferta(datos.monto_oferta, jugador.valor_mercado, es_clave=(jugador.rol == "TITULAR"), ronda=datos.ronda)
 
     if resultado["estado"] == "ACEPTADA":
@@ -2093,6 +2670,15 @@ async def negociar_contrato_traspaso(datos: NegociarContratoTraspasoIn, db: Asyn
             id_equipo_vendedor=vendedor.id_equipo, monto_oferta=datos.monto_oferta,
             salario_pactado=datos.salario_ofrecido, estado="ACEPTADA", efectivizada=False,
         ))
+        # Add-ons: pagos extra que el comprador ofreció como endulzante,
+        # atados a que el jugador sume partidos con su club nuevo — se
+        # cobran solos, ver _calcular_efectos_fisicos.
+        for addon in datos.addons:
+            if addon.partidos > 0 and addon.monto > 0:
+                db.add(AddOnTransferencia(
+                    id_jugador=jugador.id_jugador, id_equipo_beneficiario=vendedor.id_equipo,
+                    partidos_objetivo=addon.partidos, monto=addon.monto, cumplido=False,
+                ))
 
         fecha = await _fecha_actual(db, jugador.id_partida)
         texto = _texto_incorporacion(fecha)
@@ -2155,6 +2741,7 @@ async def renovar_contrato(datos: RenovarContratoIn, db: AsyncSession = Depends(
         fecha = await _fecha_actual(db, jugador.id_partida)
         jugador.salario = datos.salario_propuesto
         jugador.fecha_fin_contrato = fecha + timedelta(days=365 * datos.anios)
+        jugador.clausula_rescision = datos.clausula_rescision
         mensaje = f"{jugador.nombre} renovó contrato hasta el {jugador.fecha_fin_contrato.strftime('%d/%m/%Y')} por ${money(datos.salario_propuesto)}/semana."
         await _crear_mensaje(db, jugador.id_equipo, "Secretaría Técnica", f"Renovación: {jugador.nombre}", mensaje, "CONTRATO", fecha)
         await db.commit()
@@ -2198,6 +2785,7 @@ async def firmar_precontrato(datos: PrecontratoIn, db: AsyncSession = Depends(ge
     if resultado["estado"] == "ACEPTADA":
         jugador.id_equipo_precontrato = datos.id_equipo_destino
         jugador.salario_precontrato = datos.salario_ofrecido
+        jugador.clausula_rescision = datos.clausula_rescision
         mensaje = (
             f"{jugador.nombre} firmó precontrato con {equipo_destino.nombre if equipo_destino else '?'}. "
             f"Se incorporará libre el {jugador.fecha_fin_contrato.strftime('%d/%m/%Y')}."
@@ -2239,6 +2827,8 @@ async def fichar_libre(datos: FicharLibreIn, db: AsyncSession = Depends(get_db))
         jugador.salario = datos.salario_ofrecido
         jugador.fecha_fin_contrato = fecha + timedelta(days=365 * 3)
         jugador.rol = "RESERVA"
+        jugador.clausula_rescision = datos.clausula_rescision
+        jugador.partidos_club_actual = 0
         equipo = await db.get(Equipo, datos.id_equipo)
         mensaje = f"Fichaste libre a {jugador.nombre} por ${money(datos.salario_ofrecido)}/semana."
         if equipo and equipo.es_usuario:
@@ -2292,8 +2882,8 @@ async def en_negociacion(id_equipo: int, db: AsyncSession = Depends(get_db)):
         return {
             "id_oferta": o.id_oferta, "id_jugador": o.id_jugador, "nombre_jugador": jugador.nombre,
             "posicion": jugador.posicion, "posicion_especifica": jugador.posicion_especifica, "overall": jugador.overall,
-            "nombre_comprador": comprador.nombre if comprador else "?",
-            "nombre_vendedor": vendedor.nombre if vendedor else "?",
+            "nombre_comprador": comprador.nombre if comprador else "?", "id_equipo_comprador": o.id_equipo_comprador,
+            "nombre_vendedor": vendedor.nombre if vendedor else "?", "id_equipo_vendedor": o.id_equipo_vendedor,
             "monto_oferta": o.monto_oferta, "estado": o.estado,
             "texto_incorporacion": texto_incorp,
         }
@@ -2320,21 +2910,35 @@ async def en_negociacion(id_equipo: int, db: AsyncSession = Depends(get_db)):
         await db.execute(select(Equipo).where(Equipo.id_equipo.in_(ids_clubes_precontrato)))
     ).scalars().all()} if ids_clubes_precontrato else {}
 
-    def _detalle_precontrato(j: Jugador, nombre_club: str) -> dict:
+    def _detalle_precontrato(j: Jugador, nombre_club: str, id_equipo_club: int | None) -> dict:
         return {
             "id_jugador": j.id_jugador, "nombre_jugador": j.nombre, "posicion": j.posicion,
             "posicion_especifica": j.posicion_especifica, "overall": j.overall, "potencial": j.potencial,
             "salario_precontrato": j.salario_precontrato,
             "fecha_fin_contrato": j.fecha_fin_contrato.isoformat() if j.fecha_fin_contrato else None,
-            "nombre_club": nombre_club,
+            "nombre_club": nombre_club, "id_equipo_club": id_equipo_club,
         }
 
     entrantes_por_id = {j.id_jugador: j for j in entrantes}
-    entrantes_detalle = [_detalle_precontrato(j, clubes_precontrato.get(j.id_equipo).nombre if j.id_equipo and clubes_precontrato.get(j.id_equipo) else "Agente libre") for j in entrantes]
+    entrantes_detalle = [
+        _detalle_precontrato(
+            j,
+            clubes_precontrato.get(j.id_equipo).nombre if j.id_equipo and clubes_precontrato.get(j.id_equipo) else "Agente libre",
+            j.id_equipo,
+        )
+        for j in entrantes
+    ]
     reportes_precontrato = await _reportes_de(db, id_equipo, list(entrantes_por_id))
     for d in entrantes_detalle:
         _aplicar_fog(d, entrantes_por_id[d["id_jugador"]], reportes_precontrato.get(d["id_jugador"]))
-    salientes_detalle = [_detalle_precontrato(j, clubes_precontrato[j.id_equipo_precontrato].nombre if j.id_equipo_precontrato in clubes_precontrato else "?") for j in salientes]
+    salientes_detalle = [
+        _detalle_precontrato(
+            j,
+            clubes_precontrato[j.id_equipo_precontrato].nombre if j.id_equipo_precontrato in clubes_precontrato else "?",
+            j.id_equipo_precontrato,
+        )
+        for j in salientes
+    ]
 
     return {
         "comprando": comprando_detalle,
@@ -2397,6 +3001,12 @@ async def responder_oferta(datos: RespuestaOfertaIn, db: AsyncSession = Depends(
         raise HTTPException(status_code=400, detail="No podés vender, tu plantilla quedaría muy corta.")
 
     oferta.estado = "ACEPTADA"
+    # Reventa: condición que pone el vendedor al aceptar, no algo que se
+    # negocie — se guarda en el jugador para que _efectivizar_ofertas_pendientes
+    # la cobre recién en la venta SIGUIENTE (no en esta).
+    if datos.porcentaje_reventa_solicitado and 0 < datos.porcentaje_reventa_solicitado <= 100:
+        jugador.id_club_reventa = vendedor.id_equipo
+        jugador.porcentaje_reventa = datos.porcentaje_reventa_solicitado
     texto = _texto_incorporacion(fecha)
     mensaje = f"Aceptaste vender a {jugador.nombre} a {comprador.nombre} por ${money(oferta.monto_oferta)}. Se hará efectivo {texto}."
     await _crear_mensaje(db, vendedor.id_equipo, "Secretaría Técnica", f"Venta acordada: {jugador.nombre}", mensaje, "MERCADO", fecha)
@@ -2690,6 +3300,347 @@ async def obtener_economia(id_equipo: int, db: AsyncSession = Depends(get_db)):
     }
 
 
+# ---------- MULTICLUB ----------
+async def _presupuesto_referencia_liga(db: AsyncSession, equipo: Equipo) -> float:
+    return float((await db.execute(
+        select(func.avg(Equipo.presupuesto_fichajes)).where(Equipo.id_liga == equipo.id_liga)
+    )).scalar() or equipo.presupuesto_fichajes)
+
+
+async def _valor_club_equipo(db: AsyncSession, equipo: Equipo) -> int:
+    valor_plantel = (await db.execute(
+        select(func.coalesce(func.sum(Jugador.valor_mercado), 0)).where(
+            Jugador.id_equipo == equipo.id_equipo, Jugador.categoria == "PRIMERA",
+        )
+    )).scalar()
+    return multiclub_engine.valor_club(equipo.reputacion, equipo.presupuesto_fichajes, valor_plantel)
+
+
+@app.get("/equipos/{id_equipo}/multiclub", tags=["Multiclub"])
+async def obtener_multiclub(id_equipo: int, db: AsyncSession = Depends(get_db)):
+    equipo = await db.get(Equipo, id_equipo)
+    if not equipo:
+        raise HTTPException(status_code=404, detail="Equipo no encontrado")
+
+    tenencias = (await db.execute(
+        select(AfiliacionClub).where(AfiliacionClub.id_partida == equipo.id_partida, AfiliacionClub.id_equipo_inversor == id_equipo)
+    )).scalars().all()
+    participaciones_sobre_mi = (await db.execute(
+        select(AfiliacionClub).where(AfiliacionClub.id_partida == equipo.id_partida, AfiliacionClub.id_equipo_participado == id_equipo)
+    )).scalars().all()
+    ids_contraparte = {a.id_equipo_participado for a in tenencias} | {a.id_equipo_inversor for a in participaciones_sobre_mi}
+    socio_marca = None
+    if equipo.red_marca:
+        socio_marca = (await db.execute(
+            select(Equipo).where(Equipo.id_partida == equipo.id_partida, Equipo.red_marca == equipo.red_marca, Equipo.id_equipo != id_equipo)
+        )).scalars().first()
+        if socio_marca:
+            ids_contraparte.add(socio_marca.id_equipo)
+    equipos_contraparte = {e.id_equipo: e for e in (
+        await db.execute(select(Equipo).where(Equipo.id_equipo.in_(ids_contraparte)))
+    ).scalars().all()} if ids_contraparte else {}
+
+    bono_red = await _bono_red_equipo(db, equipo)
+    # (tipo_relacion, rol, reputacion_contraparte, nombre_contraparte) — se
+    # guarda el nombre al lado para no tener que reconstruir cuál vínculo
+    # ganó después de elegir el más fuerte con fuerza_relacion.
+    candidatos = [
+        (a.tipo_relacion, "PARTICIPADO", equipos_contraparte[a.id_equipo_inversor].reputacion, equipos_contraparte[a.id_equipo_inversor].nombre)
+        for a in participaciones_sobre_mi if a.id_equipo_inversor in equipos_contraparte
+    ]
+    candidatos += [
+        (a.tipo_relacion, "INVERSOR", equipos_contraparte[a.id_equipo_participado].reputacion, equipos_contraparte[a.id_equipo_participado].nombre)
+        for a in tenencias if a.id_equipo_participado in equipos_contraparte
+    ]
+    if socio_marca:
+        candidatos.append(("MARCA", "MARCA", socio_marca.reputacion, socio_marca.nombre))
+    posicion = None
+    if candidatos:
+        tipo, rol, _, nombre_contraparte = max(candidatos, key=lambda c: multiclub_engine.fuerza_relacion(c[0], c[1], c[2]))
+        posicion = {"tipo_relacion": tipo, "rol": rol, "contraparte": nombre_contraparte}
+
+    pendientes = (await db.execute(
+        select(SolicitudParticipacion).where(
+            SolicitudParticipacion.id_partida == equipo.id_partida,
+            SolicitudParticipacion.id_equipo_iniciador == id_equipo,
+            SolicitudParticipacion.estado == "PENDIENTE",
+        )
+    )).scalars().all()
+
+    return {
+        "posicion": posicion,
+        "bono": bono_red,
+        "red_marca": equipo.red_marca,
+        "socio_marca": socio_marca.nombre if socio_marca else None,
+        "tus_participaciones": [
+            {"id_equipo": a.id_equipo_participado, "nombre": equipos_contraparte[a.id_equipo_participado].nombre,
+             "porcentaje": a.porcentaje, "tipo_relacion": a.tipo_relacion, "id_afiliacion": a.id_afiliacion,
+             "influencia_habilitada": a.influencia_habilitada,
+             "pipeline_habilitado": a.tipo_relacion in multiclub_engine.TIPOS_CON_PIPELINE}
+            for a in tenencias if a.id_equipo_participado in equipos_contraparte
+        ],
+        "participaciones_sobre_tu_club": [
+            {"id_equipo": a.id_equipo_inversor, "nombre": equipos_contraparte[a.id_equipo_inversor].nombre,
+             "porcentaje": a.porcentaje, "tipo_relacion": a.tipo_relacion, "id_afiliacion": a.id_afiliacion,
+             "influencia_habilitada": a.influencia_habilitada,
+             "pipeline_habilitado": a.tipo_relacion in multiclub_engine.TIPOS_CON_PIPELINE}
+            for a in participaciones_sobre_mi if a.id_equipo_inversor in equipos_contraparte
+        ],
+        "solicitudes_pendientes": [
+            {"id_solicitud": s.id_solicitud, "id_equipo_contraparte": s.id_equipo_contraparte,
+             "operacion": s.operacion, "porcentaje": s.porcentaje, "monto": s.monto,
+             "fase": s.fase, "fecha_resolucion": s.fecha_resolucion.isoformat()}
+            for s in pendientes
+        ],
+    }
+
+
+@app.get("/equipos/{id_equipo}/multiclub/mercado", tags=["Multiclub"])
+async def mercado_multiclub(id_equipo: int, db: AsyncSession = Depends(get_db)):
+    equipo = await db.get(Equipo, id_equipo)
+    if not equipo:
+        raise HTTPException(status_code=404, detail="Equipo no encontrado")
+
+    # Clubes de tu MISMA liga quedan afuera del mercado: en la realidad las
+    # reglas de multipropiedad prohíben tener participación en dos clubes
+    # que compiten en la misma competición (conflicto de interés deportivo).
+    otros = (await db.execute(
+        select(Equipo).where(
+            Equipo.id_partida == equipo.id_partida, Equipo.id_equipo != id_equipo, Equipo.id_liga != equipo.id_liga,
+        )
+    )).scalars().all()
+    tenencias = {a.id_equipo_participado: a for a in (await db.execute(
+        select(AfiliacionClub).where(AfiliacionClub.id_partida == equipo.id_partida, AfiliacionClub.id_equipo_inversor == id_equipo)
+    )).scalars().all()}
+    # valor_club de TODOS los clubes en 2 consultas (una agregada de plantel,
+    # nada de N+1) — con ~180 clubes por partida, una consulta por club era
+    # la diferencia entre milisegundos y minutos con la latencia de Neon.
+    valores_plantel = dict((await db.execute(
+        select(Jugador.id_equipo, func.coalesce(func.sum(Jugador.valor_mercado), 0))
+        .where(Jugador.id_equipo.in_([o.id_equipo for o in otros]), Jugador.categoria == "PRIMERA")
+        .group_by(Jugador.id_equipo)
+    )).all())
+
+    salida = [
+        {
+            "id_equipo": otro.id_equipo, "nombre": otro.nombre, "id_liga": otro.id_liga, "reputacion": otro.reputacion,
+            "valor_club": multiclub_engine.valor_club(otro.reputacion, otro.presupuesto_fichajes, valores_plantel.get(otro.id_equipo, 0)),
+            "tu_porcentaje": tenencias[otro.id_equipo].porcentaje if otro.id_equipo in tenencias else 0,
+        }
+        for otro in otros
+    ]
+    return {"clubes": salida}
+
+
+@app.get("/multiclub/cotizar", tags=["Multiclub"])
+async def cotizar_participacion(id_equipo_iniciador: int, id_equipo_contraparte: int, operacion: str, porcentaje: int, db: AsyncSession = Depends(get_db)):
+    contraparte = await db.get(Equipo, id_equipo_contraparte)
+    if not contraparte:
+        raise HTTPException(status_code=404, detail="Club objetivo no encontrado")
+    if operacion == "COMPRAR":
+        iniciador = await db.get(Equipo, id_equipo_iniciador)
+        if iniciador and iniciador.id_liga == contraparte.id_liga:
+            raise HTTPException(status_code=400, detail="No podés comprar participación en un club de tu misma liga (conflicto de interés deportivo).")
+    valor = await _valor_club_equipo(db, contraparte)
+    afiliacion = (await db.execute(
+        select(AfiliacionClub).where(
+            AfiliacionClub.id_partida == contraparte.id_partida,
+            AfiliacionClub.id_equipo_inversor == id_equipo_iniciador,
+            AfiliacionClub.id_equipo_participado == id_equipo_contraparte,
+        )
+    )).scalars().first()
+    porcentaje_actual = afiliacion.porcentaje if afiliacion else 0
+    if operacion == "VENDER":
+        if porcentaje > porcentaje_actual:
+            raise HTTPException(status_code=400, detail="No podés vender más de lo que tenés")
+        monto = multiclub_engine.ingreso_venta(valor, porcentaje_actual, porcentaje_actual - porcentaje)
+        tipo_relevante = multiclub_engine.tipo_relacion_por_porcentaje(porcentaje_actual) or "MINORITARIO"
+    else:
+        if porcentaje_actual + porcentaje > 100:
+            raise HTTPException(status_code=400, detail=f"No podés superar el 100% (ya tenés {porcentaje_actual}%)")
+        monto = multiclub_engine.costo_participacion(valor, porcentaje_actual, porcentaje_actual + porcentaje)
+        tipo_relevante = multiclub_engine.tipo_relacion_por_porcentaje(porcentaje_actual + porcentaje) or "MINORITARIO"
+
+    presupuesto_referencia_liga = await _presupuesto_referencia_liga(db, contraparte)
+    interes = multiclub_engine.interes_directiva_contraparte(
+        contraparte.reputacion, contraparte.presupuesto_fichajes, presupuesto_referencia_liga, tipo_relevante, operacion,
+    )
+    return {
+        "valor_club": valor, "porcentaje_actual": porcentaje_actual, "monto": monto,
+        "tipo_relacion_resultante": tipo_relevante, "interes_directiva_contraparte": interes,
+    }
+
+
+@app.post("/multiclub/ofertar", tags=["Multiclub"])
+async def ofertar_participacion(datos: OfertaParticipacionIn, db: AsyncSession = Depends(get_db)):
+    if datos.operacion not in ("COMPRAR", "VENDER"):
+        raise HTTPException(status_code=400, detail="Operación inválida")
+    if datos.id_equipo_iniciador == datos.id_equipo_contraparte:
+        raise HTTPException(status_code=400, detail="No podés operar sobre tu propio club")
+    iniciador = await db.get(Equipo, datos.id_equipo_iniciador)
+    contraparte = await db.get(Equipo, datos.id_equipo_contraparte)
+    if not iniciador or not contraparte:
+        raise HTTPException(status_code=404, detail="Equipo no encontrado")
+    if datos.operacion == "COMPRAR" and iniciador.id_liga == contraparte.id_liga:
+        raise HTTPException(status_code=400, detail="No podés comprar participación en un club de tu misma liga (conflicto de interés deportivo).")
+
+    ya_pendiente = (await db.execute(
+        select(SolicitudParticipacion).where(
+            SolicitudParticipacion.id_equipo_iniciador == datos.id_equipo_iniciador,
+            SolicitudParticipacion.id_equipo_contraparte == datos.id_equipo_contraparte,
+            SolicitudParticipacion.estado == "PENDIENTE",
+        )
+    )).scalars().first()
+    if ya_pendiente:
+        raise HTTPException(status_code=400, detail="Ya hay una operación pendiente con ese club")
+
+    valor = await _valor_club_equipo(db, contraparte)
+    afiliacion = (await db.execute(
+        select(AfiliacionClub).where(
+            AfiliacionClub.id_partida == iniciador.id_partida,
+            AfiliacionClub.id_equipo_inversor == datos.id_equipo_iniciador,
+            AfiliacionClub.id_equipo_participado == datos.id_equipo_contraparte,
+        )
+    )).scalars().first()
+    porcentaje_actual = afiliacion.porcentaje if afiliacion else 0
+    if datos.operacion == "VENDER":
+        if datos.porcentaje > porcentaje_actual:
+            raise HTTPException(status_code=400, detail="No podés vender más de lo que tenés")
+        monto = multiclub_engine.ingreso_venta(valor, porcentaje_actual, porcentaje_actual - datos.porcentaje)
+    else:
+        if porcentaje_actual + datos.porcentaje > 100:
+            raise HTTPException(status_code=400, detail=f"No podés superar el 100% (ya tenés {porcentaje_actual}%)")
+        monto = multiclub_engine.costo_participacion(valor, porcentaje_actual, porcentaje_actual + datos.porcentaje)
+
+    fecha = await _fecha_actual(db, iniciador.id_partida)
+    partida = await db.get(Partida, iniciador.id_partida)
+    confianza = partida.confianza_directiva if partida else directiva_engine.CONFIANZA_INICIAL
+    dias = multiclub_engine.dias_espera_directiva_propia(confianza, monto, iniciador.presupuesto_fichajes)
+    fecha_resolucion = fecha + timedelta(days=dias)
+
+    solicitud = SolicitudParticipacion(
+        id_partida=iniciador.id_partida, id_equipo_iniciador=datos.id_equipo_iniciador,
+        id_equipo_contraparte=datos.id_equipo_contraparte, operacion=datos.operacion, porcentaje=datos.porcentaje,
+        monto=monto, fecha_solicitud=fecha, fecha_resolucion=fecha_resolucion,
+    )
+    db.add(solicitud)
+    nombre_op = "compra" if datos.operacion == "COMPRAR" else "venta"
+    await _crear_mensaje(
+        db, datos.id_equipo_iniciador, "Directiva del Club", f"Solicitud enviada: {contraparte.nombre}",
+        f"Se elevó a la directiva la {nombre_op} de {datos.porcentaje}% de {contraparte.nombre} por ${money(monto)}. "
+        f"Primero se evalúa internamente, respuesta estimada el {fecha_resolucion.strftime('%d/%m/%Y')}.",
+        "SISTEMA", fecha,
+    )
+    await db.commit()
+    return {
+        "status": "ok", "monto": monto,
+        "mensaje": f"Solicitud enviada, primera respuesta estimada el {fecha_resolucion.strftime('%d/%m/%Y')}",
+        "fecha_resolucion": fecha_resolucion.isoformat(),
+    }
+
+
+@app.post("/multiclub/solicitud/{id_solicitud}/retirar", tags=["Multiclub"])
+async def retirar_solicitud_participacion(id_solicitud: int, id_equipo: int, db: AsyncSession = Depends(get_db)):
+    """Permite al equipo iniciador retirar una SolicitudParticipacion propia
+    mientras siga PENDIENTE — antes no había forma de deshacer un envío por
+    error antes de que la directiva la resolviera."""
+    solicitud = await db.get(SolicitudParticipacion, id_solicitud)
+    if not solicitud or solicitud.id_equipo_iniciador != id_equipo:
+        raise HTTPException(status_code=404, detail="Solicitud no encontrada")
+    if solicitud.estado != "PENDIENTE":
+        raise HTTPException(status_code=400, detail="Esa solicitud ya no está pendiente")
+    solicitud.estado = "CANCELADA"
+    await db.commit()
+    return {"status": "ok"}
+
+
+def _aplicar_transferencia_interna(jugador: Jugador, vendedor: Equipo, comprador: Equipo, fecha: date, monto: int) -> None:
+    """Pase definitivo a precio de familia entre clubes afiliados — mismo
+    criterio de contrato nuevo que cualquier transferencia normal, sin
+    negociación (ver /multiclub/mover-jugador)."""
+    jugador.id_equipo = comprador.id_equipo
+    jugador.salario = salario_esperado(jugador.valor_mercado, jugador.edad)
+    jugador.fecha_fin_contrato = fecha + timedelta(days=365 * 3)
+    jugador.rol = "RESERVA"
+    jugador.id_equipo_dueno = None
+    jugador.fin_cesion = None
+    jugador.opcion_compra = None
+    vendedor.presupuesto_fichajes += monto
+    comprador.presupuesto_fichajes -= monto
+    vendedor.presupuesto_salarios = tope_salarial(vendedor.presupuesto_fichajes)
+    comprador.presupuesto_salarios = tope_salarial(comprador.presupuesto_fichajes)
+
+
+@app.post("/multiclub/mover-jugador", tags=["Multiclub"])
+async def mover_jugador_afiliado(datos: MoverJugadorIn, db: AsyncSession = Depends(get_db)):
+    """Pipeline de préstamos/transferencias facilitado entre dos clubes con
+    una AfiliacionClub Satélite o Propietario — sin negociación, sin tirada
+    de interés, instantáneo (a diferencia de /fichajes/ceder o una
+    transferencia normal)."""
+    if datos.operacion not in ("PRESTAMO", "TRANSFERENCIA"):
+        raise HTTPException(status_code=400, detail="Operación inválida")
+    jugador = await db.get(Jugador, datos.id_jugador)
+    if not jugador or not jugador.id_equipo:
+        raise HTTPException(status_code=404, detail="Jugador no encontrado")
+    if jugador.id_equipo_dueno is not None:
+        raise HTTPException(status_code=400, detail="Ese jugador ya está cedido a préstamo en otro club")
+    origen = await db.get(Equipo, jugador.id_equipo)
+    destino = await db.get(Equipo, datos.id_equipo_destino)
+    if not destino:
+        raise HTTPException(status_code=404, detail="Club destino no encontrado")
+    if origen.id_equipo == destino.id_equipo:
+        raise HTTPException(status_code=400, detail="El jugador ya está en ese club")
+
+    afiliacion = (await db.execute(
+        select(AfiliacionClub).where(
+            AfiliacionClub.id_partida == origen.id_partida,
+            AfiliacionClub.tipo_relacion.in_(multiclub_engine.TIPOS_CON_PIPELINE),
+            or_(
+                and_(AfiliacionClub.id_equipo_inversor == origen.id_equipo, AfiliacionClub.id_equipo_participado == destino.id_equipo),
+                and_(AfiliacionClub.id_equipo_inversor == destino.id_equipo, AfiliacionClub.id_equipo_participado == origen.id_equipo),
+            ),
+        )
+    )).scalars().first()
+    if not afiliacion:
+        raise HTTPException(status_code=400, detail="Estos clubes no tienen una afiliación (Satélite o Propietario) que habilite el pipeline")
+
+    fecha = await _fecha_actual(db, origen.id_partida)
+
+    if datos.operacion == "PRESTAMO":
+        if datos.duracion_meses not in DURACIONES_CESION_VALIDAS:
+            raise HTTPException(status_code=400, detail="La duración de la cesión debe ser 6 o 12 meses")
+        _aplicar_cesion(jugador, origen, destino, datos.duracion_meses, datos.opcion_compra, fecha)
+        monto = 0
+        mensaje = f"{destino.nombre} se lleva a {jugador.nombre} a préstamo por el pipeline de tu red multiclub."
+    else:
+        monto = multiclub_engine.costo_transferencia_interna(jugador.valor_mercado)
+        _aplicar_transferencia_interna(jugador, origen, destino, fecha, monto)
+        mensaje = f"{destino.nombre} se queda con {jugador.nombre} por transferencia interna (precio de familia: ${money(monto)})."
+
+    if origen.es_usuario:
+        await _crear_mensaje(db, origen.id_equipo, "Secretaría Técnica", f"Movimiento interno: {jugador.nombre}", mensaje, "MERCADO", fecha)
+    if destino.es_usuario:
+        await _crear_mensaje(db, destino.id_equipo, "Secretaría Técnica", f"Movimiento interno: {jugador.nombre}", mensaje, "MERCADO", fecha)
+
+    await db.commit()
+    return {"status": "ok", "mensaje": mensaje, "monto": monto}
+
+
+@app.post("/multiclub/influencia", tags=["Multiclub"])
+async def togglear_influencia(datos: InfluenciaIn, db: AsyncSession = Depends(get_db)):
+    """Habilita/deshabilita que el equipo inversor gestione táctica,
+    entrenamiento y fichajes del club participado (ver clubActivo en el
+    frontend) — solo para afiliaciones Satélite o Propietario."""
+    afiliacion = await db.get(AfiliacionClub, datos.id_afiliacion)
+    if not afiliacion:
+        raise HTTPException(status_code=404, detail="Afiliación no encontrada")
+    if afiliacion.tipo_relacion not in multiclub_engine.TIPOS_CON_PIPELINE:
+        raise HTTPException(status_code=400, detail="Esta afiliación no permite influencia (solo Satélite o Propietario)")
+    afiliacion.influencia_habilitada = datos.habilitada
+    await db.commit()
+    return {"status": "ok", "influencia_habilitada": afiliacion.influencia_habilitada}
+
+
 # ---------- MERCADO: RECOMENDACIONES ESTILO SCOUTING ----------
 POSICIONES_CANCHA = ["POR", "DEF", "MED", "DEL"]
 
@@ -2748,11 +3699,30 @@ def _consejo_entrenamiento(plantel: list[Jugador]) -> str:
     promedios_attr = {
         "OFENSIVO": sum(j.ataque for j in plantel) / len(plantel),
         "DEFENSIVO": sum(j.defensa for j in plantel) / len(plantel),
+        "PASE": sum(j.pase for j in plantel) / len(plantel),
         "FISICO": sum(j.fisico for j in plantel) / len(plantel),
     }
     foco_sugerido, valor = min(promedios_attr.items(), key=lambda par: par[1])
-    etiqueta = {"OFENSIVO": "el ataque", "DEFENSIVO": "la defensa", "FISICO": "lo físico"}[foco_sugerido]
+    etiqueta = {"OFENSIVO": "el ataque", "DEFENSIVO": "la defensa", "PASE": "el pase", "FISICO": "lo físico"}[foco_sugerido]
     return f"Con la energía en buen nivel ({energia_prom:.0f}%), yo enfocaría el entrenamiento en {etiqueta} (promedio {valor:.0f}), que es lo más flojo del plantel ahora mismo."
+
+
+def _consejo_vestuario(plantel: list[Jugador], capitan: Jugador | None) -> str:
+    """Comentario del asistente sobre el estado del vestuario — puntaje,
+    qué tan dividido está el ánimo, y si conviene nombrar/cambiar capitán."""
+    primera = [j for j in plantel if j.categoria == "PRIMERA"]
+    if not primera:
+        return "Todavía no hay plantel para hablar del vestuario."
+    promedio = sum(j.moral for j in primera) / len(primera)
+    varianza = sum((j.moral - promedio) ** 2 for j in primera) / len(primera)
+    desviacion = varianza ** 0.5
+    if desviacion >= 15 and not capitan:
+        return f"El vestuario está bastante dividido de ánimo (moral entre {min(j.moral for j in primera)} y {max(j.moral for j in primera)}) — un capitán con buen liderazgo ayudaría a unificarlo."
+    if desviacion >= 15 and capitan:
+        return f"El plantel sigue algo dividido de ánimo, pero {capitan.nombre} (liderazgo {capitan.liderazgo}) está ayudando a sostener el vestuario."
+    if promedio < 55:
+        return f"La moral promedio del plantel está baja ({promedio:.0f}) — cuidado, un vestuario apagado rinde peor en la cancha."
+    return f"El vestuario está en buen estado (moral promedio {promedio:.0f}, ánimo parejo)."
 
 
 @app.get("/fichajes/recomendaciones", tags=["Transferencias"])
@@ -2858,7 +3828,7 @@ async def recomendaciones_fichaje(id_equipo: int | None = None, id_partida: int 
         candidatos.append({
             "id_jugador": j.id_jugador, "nombre": j.nombre, "posicion": j.posicion, "posicion_especifica": j.posicion_especifica,
             "edad": j.edad, "overall": j.overall, "potencial": j.potencial,
-            "club": nombre_club or "Agente Libre", "es_libre": j.id_equipo is None,
+            "club": nombre_club or "Agente Libre", "id_equipo": j.id_equipo, "es_libre": j.id_equipo is None,
             "valor_mercado": j.valor_mercado, "salario": j.salario, "asequible": asequible,
             "fecha_fin_contrato": j.fecha_fin_contrato.isoformat() if j.fecha_fin_contrato else None,
             "dias_restantes_contrato": dias_restantes,
@@ -2900,6 +3870,23 @@ async def recomendaciones_fichaje(id_equipo: int | None = None, id_partida: int 
         "recomendaciones": recomendaciones,
         "oportunidades_salida": oportunidades_salida[:10],
     }
+
+
+@app.post("/equipos/{id_equipo}/capitan", tags=["Cuerpo Técnico"])
+async def asignar_capitan(id_equipo: int, datos: CapitanIn, db: AsyncSession = Depends(get_db)):
+    """Capitán del plantel PRIMERA — su liderazgo atenúa el castigo de
+    vestuario cuando el ánimo del plantel está dividido, ver
+    _puntaje_vestuario. `id_jugador=None` quita el capitán."""
+    equipo = await db.get(Equipo, id_equipo)
+    if not equipo:
+        raise HTTPException(status_code=404, detail="Equipo no encontrado")
+    if datos.id_jugador is not None:
+        jugador = await db.get(Jugador, datos.id_jugador)
+        if not jugador or jugador.id_equipo != id_equipo or jugador.categoria != "PRIMERA":
+            raise HTTPException(status_code=400, detail="El capitán tiene que ser un jugador del plantel PRIMERA de este equipo.")
+    equipo.id_capitan = datos.id_jugador
+    await db.commit()
+    return {"status": "ok", "id_capitan": equipo.id_capitan}
 
 
 # ---------- CUERPO TÉCNICO + SCOUTING ----------
@@ -2947,12 +3934,22 @@ async def obtener_cuerpo_tecnico(id_equipo: int, db: AsyncSession = Depends(get_
         })
 
     plan = await db.get(PlanEntrenamiento, id_equipo)
+    capitan = next((j for j in plantel if j.id_jugador == equipo.id_capitan), None) if equipo.id_capitan else None
     return {
         "asistente": {"nombre": personal.nombre_asistente if personal else "?", "opinion": opinion},
         "entrenamiento": {
             "foco": plan.foco if plan else "EQUILIBRADO",
             "intensidad": plan.intensidad if plan else "MEDIA",
             "consejo": _consejo_entrenamiento(plantel),
+        },
+        "vestuario": {
+            "puntaje": round(_puntaje_vestuario(plantel, equipo.id_capitan)),
+            "consejo": _consejo_vestuario(plantel, capitan),
+            "capitan": {"id_jugador": capitan.id_jugador, "nombre": capitan.nombre} if capitan else None,
+            "plantel_primera": [
+                {"id_jugador": j.id_jugador, "nombre": j.nombre, "posicion": j.posicion}
+                for j in plantel if j.categoria == "PRIMERA"
+            ],
         },
         "ojeadores": ojeadores_out,
     }
@@ -3100,6 +4097,18 @@ async def ofrecer_jugador(datos: OfrecerJugadorIn, db: AsyncSession = Depends(ge
 DURACIONES_CESION_VALIDAS = {6: 182, 12: 365}
 
 
+def _aplicar_cesion(jugador: Jugador, dueno: Equipo, destino: Equipo, duracion_meses: int, opcion_compra: int | None, fecha: date) -> None:
+    """Setea los campos de una cesión aceptada — usado tanto por el camino
+    normal (/fichajes/ceder, después de ganar la tirada de interés) como
+    por el pipeline facilitado entre clubes afiliados (sin tirada, ver
+    /multiclub/mover-jugador)."""
+    jugador.id_equipo_dueno = dueno.id_equipo
+    jugador.id_equipo = destino.id_equipo
+    jugador.fin_cesion = fecha + timedelta(days=DURACIONES_CESION_VALIDAS[duracion_meses])
+    jugador.opcion_compra = opcion_compra
+    jugador.rol = "RESERVA"
+
+
 @app.post("/fichajes/ceder", tags=["Transferencias"])
 async def ceder_jugador(datos: CederJugadorIn, db: AsyncSession = Depends(get_db)):
     """El usuario ofrece un jugador propio a préstamo (6 o 12 meses, con
@@ -3168,11 +4177,7 @@ async def ceder_jugador(datos: CederJugadorIn, db: AsyncSession = Depends(get_db
             "mensaje": f"Ningún club se mostró interesado en llevarse a {jugador.nombre} a préstamo por ahora.",
         }
 
-    jugador.id_equipo_dueno = dueno.id_equipo
-    jugador.id_equipo = club_aceptante.id_equipo
-    jugador.fin_cesion = fecha + timedelta(days=DURACIONES_CESION_VALIDAS[datos.duracion_meses])
-    jugador.opcion_compra = datos.opcion_compra
-    jugador.rol = "RESERVA"
+    _aplicar_cesion(jugador, dueno, club_aceptante, datos.duracion_meses, datos.opcion_compra, fecha)
 
     texto_opcion = f" con opción de compra por ${money(datos.opcion_compra)}" if datos.opcion_compra else ""
     await _crear_mensaje(
@@ -3272,6 +4277,7 @@ async def borrar_partida(id_partida: int, db: AsyncSession = Depends(get_db)):
         await db.execute(delete(Mensaje).where(Mensaje.id_equipo_destino.in_(equipo_ids)))
     if jugador_ids:
         await db.execute(delete(OfertaFichaje).where(OfertaFichaje.id_jugador.in_(jugador_ids)))
+        await db.execute(delete(AddOnTransferencia).where(AddOnTransferencia.id_jugador.in_(jugador_ids)))
     await db.execute(delete(HistorialTemporada).where(HistorialTemporada.id_partida == id_partida))
     if equipo_ids:
         await db.execute(delete(Tactica).where(Tactica.id_equipo.in_(equipo_ids)))
@@ -3279,6 +4285,9 @@ async def borrar_partida(id_partida: int, db: AsyncSession = Depends(get_db)):
         await db.execute(delete(PersonalTecnico).where(PersonalTecnico.id_equipo.in_(equipo_ids)))
         await db.execute(delete(ReporteScouting).where(ReporteScouting.id_equipo.in_(equipo_ids)))
         await db.execute(delete(Ojeador).where(Ojeador.id_equipo.in_(equipo_ids)))
+    await db.execute(delete(OfertaClubDT).where(OfertaClubDT.id_partida == id_partida))
+    await db.execute(delete(AfiliacionClub).where(AfiliacionClub.id_partida == id_partida))
+    await db.execute(delete(SolicitudParticipacion).where(SolicitudParticipacion.id_partida == id_partida))
     await db.execute(delete(Jugador).where(Jugador.id_partida == id_partida))
     await db.execute(delete(Calendario).where(Calendario.id_partida == id_partida))
     await db.execute(delete(Equipo).where(Equipo.id_partida == id_partida))

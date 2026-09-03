@@ -26,6 +26,12 @@ export default function NegociacionFichajeModal({ jugador, open, onClose, API_UR
   const [ronda, setRonda] = useState(0);
   const [fase, setFase] = useState('precio'); // 'precio' (con el club) | 'contrato' (con el jugador)
   const [montoAcordado, setMontoAcordado] = useState(null);
+  // Add-ons: pagos extra endulzantes ofrecidos junto al precio base, atados
+  // a partidos jugados con el club comprador — se deciden acá (fase precio)
+  // pero recién se persisten cuando se crea el pase de verdad (enviarContrato).
+  const [addons, setAddons] = useState([]);
+  const [addonPartidos, setAddonPartidos] = useState('');
+  const [addonMonto, setAddonMonto] = useState('');
 
   useEffect(() => {
     if (!jugador) return;
@@ -35,7 +41,21 @@ export default function NegociacionFichajeModal({ jugador, open, onClose, API_UR
     setRonda(0);
     setFase('precio');
     setMontoAcordado(null);
+    setAddons([]);
+    setAddonPartidos('');
+    setAddonMonto('');
   }, [jugador]);
+
+  const agregarAddon = () => {
+    const partidos = Number(addonPartidos);
+    const monto = Number(addonMonto);
+    if (!partidos || partidos <= 0 || !monto || monto <= 0) return;
+    setAddons((prev) => [...prev, { partidos, monto }]);
+    setAddonPartidos('');
+    setAddonMonto('');
+  };
+
+  const quitarAddon = (i) => setAddons((prev) => prev.filter((_, idx) => idx !== i));
 
   if (!jugador) return null;
 
@@ -78,7 +98,7 @@ export default function NegociacionFichajeModal({ jugador, open, onClose, API_UR
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           id_jugador: jugador.id_jugador, id_equipo_comprador: idEquipoUsuario,
-          monto_oferta: montoAcordado, salario_ofrecido: salario, ronda,
+          monto_oferta: montoAcordado, salario_ofrecido: salario, ronda, addons,
         }),
       });
       const data = await res.json();
@@ -100,10 +120,10 @@ export default function NegociacionFichajeModal({ jugador, open, onClose, API_UR
   };
 
   return (
-    <Modal open={open} onClose={onClose}>
+    <Modal open={open} onClose={onClose} labelledBy="negociacion-modal-title">
       <div className="p-8 sm:p-12 max-w-xl mx-auto space-y-6">
         <div>
-          <h3 className="text-2xl font-bold text-white">
+          <h3 id="negociacion-modal-title" className="text-2xl font-bold text-white">
             {fase === 'precio' ? `Acordar precio por ${jugador.nombre}` : `Contrato con ${jugador.nombre}`}
           </h3>
           <p className="text-sm text-slate-400 mt-1">
@@ -111,9 +131,16 @@ export default function NegociacionFichajeModal({ jugador, open, onClose, API_UR
             {' · '}Ronda {Math.min(ronda + 1, RONDAS_MAX)} de {RONDAS_MAX}
           </p>
           {fase === 'contrato' && (
-            <p className="text-xs text-amber-400 mt-2">
-              El club ya aceptó el precio — ahora falta que el jugador acepte su nuevo contrato.
-            </p>
+            <>
+              <p className="text-xs text-amber-400 mt-2">
+                El club ya aceptó el precio — ahora falta que el jugador acepte su nuevo contrato.
+              </p>
+              {addons.length > 0 && (
+                <p className="text-[11px] text-slate-400 mt-1">
+                  + {addons.map((a) => `$${a.monto.toLocaleString('es-AR')} a los ${a.partidos} partidos`).join(', ')}
+                </p>
+              )}
+            </>
           )}
         </div>
 
@@ -121,7 +148,49 @@ export default function NegociacionFichajeModal({ jugador, open, onClose, API_UR
           fase === 'precio' ? (
             <div className="space-y-4 text-sm">
               <p className="text-slate-300">Valor estimado: ${jugador.valor_mercado.toLocaleString('es-AR')}</p>
+              {jugador.clausula_rescision != null && (
+                <div className="bg-rose-950/40 border border-rose-500/40 rounded-xl p-3 flex items-center justify-between gap-3">
+                  <p className="text-xs text-rose-300">
+                    Tiene cláusula de rescisión: <span className="font-bold">${jugador.clausula_rescision.toLocaleString('es-AR')}</span>. El club no puede negarse a esa cifra.
+                  </p>
+                  <button
+                    onClick={() => enviarOferta(jugador.clausula_rescision)}
+                    disabled={procesando}
+                    className="shrink-0 bg-rose-500 hover:bg-rose-400 disabled:opacity-50 text-slate-950 font-bold px-3 py-2 rounded-lg text-xs"
+                  >
+                    Pagar cláusula
+                  </button>
+                </div>
+              )}
               <MoneyInput value={ofertaMonto} onChange={setOfertaMonto} className="w-full bg-[#0b1326] border border-slate-700 p-3 rounded-xl text-white" />
+
+              <div className="border-t border-slate-800 pt-4 space-y-2">
+                <p className="text-xs text-slate-400">Add-ons (opcional): pagos extra si suma partidos con vos, para poder ofrecer un precio base más bajo.</p>
+                {addons.map((a, i) => (
+                  <div key={i} className="flex items-center justify-between gap-2 bg-[#0b1326] border border-slate-800 rounded-lg px-3 py-2 text-xs">
+                    <span className="text-slate-300">${a.monto.toLocaleString('es-AR')} a los {a.partidos} partidos</span>
+                    <button onClick={() => quitarAddon(i)} className="text-rose-400 hover:text-rose-300 font-bold shrink-0">Quitar</button>
+                  </div>
+                ))}
+                <div className="flex gap-2 items-end">
+                  <div className="flex-1">
+                    <label htmlFor="addon-partidos" className="text-[10px] text-slate-400 block mb-1">Partidos</label>
+                    <input
+                      id="addon-partidos" type="number" min="1" value={addonPartidos}
+                      onChange={(e) => setAddonPartidos(e.target.value)}
+                      className="w-full bg-[#0b1326] border border-slate-700 p-2 rounded-lg text-white text-xs"
+                    />
+                  </div>
+                  <div className="flex-1">
+                    <label htmlFor="addon-monto" className="text-[10px] text-slate-400 block mb-1">Monto</label>
+                    <MoneyInput id="addon-monto" value={addonMonto} onChange={setAddonMonto} className="w-full bg-[#0b1326] border border-slate-700 p-2 rounded-lg text-white text-xs" />
+                  </div>
+                  <button onClick={agregarAddon} className="shrink-0 bg-slate-800 hover:bg-slate-700 text-slate-300 px-3 py-2 rounded-lg text-xs font-bold">
+                    + Agregar
+                  </button>
+                </div>
+              </div>
+
               <button
                 onClick={() => enviarOferta()}
                 disabled={procesando}
@@ -133,8 +202,8 @@ export default function NegociacionFichajeModal({ jugador, open, onClose, API_UR
           ) : (
             <div className="space-y-4 text-sm">
               <p className="text-slate-300">Salario actual del jugador: ${jugador.salario?.toLocaleString('es-AR') || '?'}/semana</p>
-              <label className="text-xs text-slate-400 block mb-1">Salario semanal ofrecido</label>
-              <MoneyInput value={salarioOfrecido} onChange={setSalarioOfrecido} className="w-full bg-[#0b1326] border border-slate-700 p-3 rounded-xl text-white" />
+              <label htmlFor="negociacion-salario" className="text-xs text-slate-400 block mb-1">Salario semanal ofrecido</label>
+              <MoneyInput id="negociacion-salario" value={salarioOfrecido} onChange={setSalarioOfrecido} className="w-full bg-[#0b1326] border border-slate-700 p-3 rounded-xl text-white" />
               <button
                 onClick={() => enviarContrato()}
                 disabled={procesando}
@@ -179,6 +248,12 @@ export default function NegociacionFichajeModal({ jugador, open, onClose, API_UR
                   Hacer otra oferta
                 </button>
               </div>
+            )}
+
+            {respuesta.estado === 'CONTRAOFERTA' && ronda >= RONDAS_MAX && (
+              <p className="text-xs text-slate-400">
+                No llegaron a un acuerdo — se agotaron las {RONDAS_MAX} rondas de negociación.
+              </p>
             )}
 
             <button onClick={onClose} className="w-full bg-slate-800 text-slate-300 px-3 py-2.5 rounded-lg">

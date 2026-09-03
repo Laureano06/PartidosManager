@@ -21,7 +21,7 @@ function PanelCategoria({ categoria, jugadores, onClick }) {
           Mejor potencial: <span className="text-slate-200 font-bold">{mejor.nombre}</span> ({mejor.potencial})
         </p>
       ) : (
-        <p className="text-[11px] text-slate-500">Sin jugadores todavía.</p>
+        <p className="text-[11px] text-slate-400">Sin jugadores todavía.</p>
       )}
       <p className="text-[10px] text-sky-400">Ver plantilla →</p>
     </button>
@@ -33,7 +33,7 @@ function TarjetaIntake({ jugador, onDecidir }) {
     <div className="bg-[#0b1326] border border-slate-800 rounded-xl p-4 flex items-center justify-between gap-4">
       <div>
         <p className="font-bold text-slate-200 text-sm">{jugador.nombre}</p>
-        <p className="text-[11px] text-slate-500">
+        <p className="text-[11px] text-slate-400">
           {jugador.posicion_especifica || jugador.posicion} · {jugador.edad} años · Ovr {jugador.overall} · Pot{' '}
           <span className="text-amber-300 font-bold">{jugador.potencial}</span>
         </p>
@@ -82,7 +82,7 @@ function BuscarEnOtrosClubes({ API_URL, idEquipoUsuario, idPartida }) {
     <div className="bg-[#121e36] border border-slate-800 rounded-2xl p-6 space-y-4">
       <div>
         <h2 className="text-sm font-bold text-white mb-1">Buscar en otros clubes</h2>
-        <p className="text-[11px] text-slate-500">
+        <p className="text-[11px] text-slate-400">
           Si el jugador no tiene contrato, se recluta directo pagando una compensación por formación. Si ya tiene contrato con su club, hay que negociar el fichaje.
           Reclutar/negociar un menor de 18 solo es posible si el club de origen es del mismo país (regla real de la FIFA).
         </p>
@@ -91,6 +91,7 @@ function BuscarEnOtrosClubes({ API_URL, idEquipoUsuario, idPartida }) {
         <select
           value={categoria}
           onChange={(e) => setCategoria(e.target.value)}
+          aria-label="Categoría"
           className="bg-slate-800 text-slate-200 text-xs px-3 py-2 rounded-lg border-none"
         >
           {CATEGORIAS_ACADEMIA.map((c) => (
@@ -112,8 +113,9 @@ function BuscarEnOtrosClubes({ API_URL, idEquipoUsuario, idPartida }) {
         </button>
       </div>
       {mensaje && <p className="text-[11px] text-amber-300">{mensaje}</p>}
-      {buscando && <p className="text-xs text-slate-500">Buscando...</p>}
+      {buscando && <p className="text-xs text-slate-400">Buscando...</p>}
       {!buscando && resultados.length > 0 && (
+        <div className="overflow-x-auto">
         <table className="w-full text-left text-xs">
           <thead>
             <tr className="border-b border-slate-800 text-slate-400">
@@ -162,6 +164,7 @@ function BuscarEnOtrosClubes({ API_URL, idEquipoUsuario, idPartida }) {
             ))}
           </tbody>
         </table>
+        </div>
       )}
 
       <ConfirmarReclutamientoModal
@@ -197,6 +200,7 @@ export default function AcademiaPage({ API_URL, idEquipoUsuario, idPartida }) {
   const [academia, setAcademia] = useState(null);
   const [intake, setIntake] = useState(null);
   const [cargando, setCargando] = useState(true);
+  const [error, setError] = useState(null);
 
   useEffect(() => {
     if (!idEquipoUsuario) return;
@@ -217,7 +221,8 @@ export default function AcademiaPage({ API_URL, idEquipoUsuario, idPartida }) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ aceptar }),
       });
-      if (!r.ok) return;
+      if (!r.ok) throw new Error('respuesta no ok');
+      setError(null);
       setIntake((prev) => {
         const copia = { ...prev };
         for (const c of Object.keys(copia)) {
@@ -226,8 +231,9 @@ export default function AcademiaPage({ API_URL, idEquipoUsuario, idPartida }) {
         return copia;
       });
       if (aceptar) setAcademia(null); // se invalida, se vuelve a pedir la próxima vez que se visite Plantel/Academia
-    } catch (error) {
-      console.error('Error decidiendo intake:', error);
+    } catch (e) {
+      console.error('Error decidiendo intake:', e);
+      setError('No se pudo procesar la decisión sobre ese prospecto. Probá de nuevo.');
     }
   };
 
@@ -239,6 +245,12 @@ export default function AcademiaPage({ API_URL, idEquipoUsuario, idPartida }) {
 
   return (
     <div className="space-y-6">
+      {error && (
+        <div className="bg-rose-950/60 border border-rose-500/40 text-rose-300 rounded-xl p-3 text-xs flex items-center justify-between gap-3">
+          <span>{error}</span>
+          <button onClick={() => setError(null)} className="text-rose-300 hover:text-rose-100 font-bold shrink-0">✕</button>
+        </div>
+      )}
       <div className="bg-[#121e36] border border-slate-800 rounded-2xl p-5">
         <p className="text-xs text-slate-400">INFORME DE:</p>
         <p className="text-sm font-bold text-white">Academia de {academia.nombre_equipo}</p>
@@ -259,7 +271,7 @@ export default function AcademiaPage({ API_URL, idEquipoUsuario, idPartida }) {
         <div className="bg-[#121e36] border border-slate-800 rounded-2xl p-6 space-y-4">
           <div>
             <h2 className="text-sm font-bold text-white mb-1">Intake Anual</h2>
-            <p className="text-[11px] text-slate-500">
+            <p className="text-[11px] text-slate-400">
               Nuevos prospectos de esta temporada. Decidí uno por uno si se suman a la Academia — 15 es el piso por categoría, no el techo.
             </p>
           </div>

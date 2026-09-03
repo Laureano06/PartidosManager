@@ -8,7 +8,7 @@ export default function JugarPage() {
       <div className="shrink-0">
         <Link to="/panel" className="text-xs text-sky-400 hover:underline">← Volver al panel</Link>
         <h1 className="text-lg font-black text-white mt-1">Motor Jugable (prototipo)</h1>
-        <p className="text-[11px] text-slate-500 mt-1">
+        <p className="text-[11px] text-slate-400 mt-1">
           Primer paso de un motor en tiempo real, separado de la cancha 3D del partido: acá solo se prueba el
           movimiento de un jugador (aceleración, frenado, sprint), sin pelota ni IA todavía. El resto del plantel
           está parado de referencia.

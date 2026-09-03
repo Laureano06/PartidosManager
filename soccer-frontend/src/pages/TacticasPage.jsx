@@ -44,37 +44,60 @@ function calcularAlineacion(plantilla, slots, asignacionManual) {
   return resultado;
 }
 
-function PanelBanca({ titulo, jugadores, rolDestino, vacio, panelSobrevolado, onDragOverPanel, onDragLeavePanel, onDropPanel, onVerFicha, horizontal, bare }) {
+function PanelBanca({ titulo, jugadores, rolDestino, vacio, panelSobrevolado, onDragOverPanel, onDragLeavePanel, onDropPanel, onVerFicha, horizontal, bare, jugadorSeleccionado, onToggleSeleccion, onColocarAqui }) {
+  const modoColocar = jugadorSeleccionado != null;
   return (
     <div
       onDragOver={(e) => { e.preventDefault(); onDragOverPanel(rolDestino); }}
       onDragLeave={() => onDragLeavePanel(rolDestino)}
       onDrop={(e) => onDropPanel(e, rolDestino)}
+      onClick={() => onColocarAqui(rolDestino)}
+      onKeyDown={(e) => { if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); onColocarAqui(rolDestino); } }}
+      role={modoColocar ? 'button' : undefined}
+      tabIndex={modoColocar ? 0 : undefined}
+      aria-label={modoColocar ? `Enviar a ${titulo}` : undefined}
       className={`transition ${
         bare
           ? 'shrink-0'
-          : `bg-[#121e36] border rounded-2xl p-4 ${horizontal ? '' : 'space-y-2 h-full flex flex-col min-h-0'} ${panelSobrevolado === rolDestino ? 'border-sky-500' : 'border-slate-800'}`
+          : `bg-[#121e36] border rounded-2xl p-4 ${horizontal ? '' : 'space-y-2 h-full flex flex-col min-h-0'} ${
+              panelSobrevolado === rolDestino || modoColocar ? 'border-sky-500' : 'border-slate-800'
+            }`
       }`}
     >
       <h4 className="text-xs font-bold text-slate-300 uppercase shrink-0 mb-2">{titulo} ({jugadores.length})</h4>
       <div className={horizontal ? 'flex flex-row gap-2 overflow-x-auto scroll-slide pb-1' : 'space-y-2 overflow-y-auto scroll-slide min-h-0 flex-1 pr-1 max-h-56'}>
-        {jugadores.map((j) => (
+        {jugadores.map((j) => {
+          const seleccionado = jugadorSeleccionado === j.id_jugador;
+          return (
           <div
             key={j.id_jugador}
             draggable
             onDragStart={(e) => { e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', String(j.id_jugador)); }}
-            className={`p-2 rounded-xl border border-slate-800 bg-[#0b1326] hover:border-sky-500/50 cursor-grab active:cursor-grabbing text-xs flex justify-between items-center transition gap-2 ${
-              horizontal ? 'shrink-0 w-40' : ''
-            }`}
+            onClick={(e) => { e.stopPropagation(); if (modoColocar) onColocarAqui(rolDestino); else onVerFicha(j); }}
+            className={`p-2 rounded-xl border bg-[#0b1326] hover:border-sky-500/50 cursor-grab active:cursor-grabbing text-xs flex justify-between items-center transition gap-2 ${
+              seleccionado ? 'border-sky-400 ring-1 ring-sky-400' : 'border-slate-800'
+            } ${horizontal ? 'shrink-0 w-40' : ''}`}
           >
-            <div className="cursor-pointer flex-1 min-w-0" onClick={() => onVerFicha(j)}>
+            <div className="flex-1 min-w-0">
               <p className="font-bold text-slate-200 truncate">{j.nombre}</p>
-              <p className="text-[10px] text-slate-500">Ovr {j.overall}</p>
+              <p className="text-[10px] text-slate-400">Ovr {j.overall}</p>
             </div>
+            <button
+              onClick={(e) => { e.stopPropagation(); onToggleSeleccion(j.id_jugador); }}
+              aria-label={seleccionado ? `Cancelar mover a ${j.nombre}` : `Mover a ${j.nombre}`}
+              aria-pressed={seleccionado}
+              title="Mover con teclado/click (alternativa a arrastrar)"
+              className={`text-[10px] w-5 h-5 rounded flex items-center justify-center shrink-0 ${
+                seleccionado ? 'bg-sky-400 text-slate-950' : 'bg-slate-800 text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              ⇄
+            </button>
             <span className="text-[10px] bg-slate-800 text-sky-400 px-1.5 py-0.5 rounded font-bold shrink-0" title={j.posicion}>{j.posicion_especifica || j.posicion}</span>
           </div>
-        ))}
-        {jugadores.length === 0 && <p className="text-[11px] text-slate-600 shrink-0">{vacio}</p>}
+          );
+        })}
+        {jugadores.length === 0 && <p className="text-[11px] text-slate-400 shrink-0">{vacio}</p>}
       </div>
     </div>
   );
@@ -83,13 +106,16 @@ function PanelBanca({ titulo, jugadores, rolDestino, vacio, panelSobrevolado, on
 // El banco de suplentes tiene siempre 9 lugares fijos: si sobran jugadores
 // no entran (hay que bajar a alguien primero) y si faltan, el lugar queda
 // vacío en vez de que el banco achique o agrande su tamaño.
-function BancoSuplentes({ slots, slotSobrevolado, onDragOverSlot, onDragLeaveSlot, onDropSlot, onVerFicha, vertical, bare }) {
+function BancoSuplentes({ slots, slotSobrevolado, onDragOverSlot, onDragLeaveSlot, onDropSlot, onVerFicha, vertical, bare, jugadorSeleccionado, onToggleSeleccion, onColocarEn }) {
   const ocupados = slots.filter(Boolean).length;
+  const modoColocar = jugadorSeleccionado != null;
   return (
     <div className={bare ? 'shrink-0' : `bg-[#121e36] border border-slate-800 rounded-2xl p-4 ${vertical ? 'h-full flex flex-col min-h-0' : ''}`}>
       <h4 className="text-xs font-bold text-slate-300 uppercase mb-2 shrink-0">Banco de Suplentes ({ocupados}/{BANCO_SIZE})</h4>
       <div className={vertical ? 'grid grid-cols-2 gap-2 overflow-y-auto scroll-slide min-h-0' : 'grid grid-cols-3 sm:grid-cols-9 gap-2'}>
-        {slots.map((j, i) => (
+        {slots.map((j, i) => {
+          const seleccionado = !!j && jugadorSeleccionado === j.id_jugador;
+          return (
           <div
             key={i}
             draggable={!!j}
@@ -97,21 +123,39 @@ function BancoSuplentes({ slots, slotSobrevolado, onDragOverSlot, onDragLeaveSlo
             onDragOver={(e) => { e.preventDefault(); onDragOverSlot(i); }}
             onDragLeave={() => onDragLeaveSlot(i)}
             onDrop={(e) => onDropSlot(e, i)}
-            onClick={j ? () => onVerFicha(j) : undefined}
-            className={`h-16 rounded-xl border p-1.5 flex items-center justify-center text-center transition ${
-              j ? 'bg-[#0b1326] cursor-grab active:cursor-grabbing' : 'border-dashed'
-            } ${slotSobrevolado === i ? 'border-sky-400 scale-105' : 'border-slate-800'}`}
+            onClick={() => { if (modoColocar) onColocarEn(i); else if (j) onVerFicha(j); }}
+            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); if (modoColocar) onColocarEn(i); else if (j) onVerFicha(j); } }}
+            role="button"
+            tabIndex={0}
+            aria-label={j ? `${j.nombre}, ${j.posicion_especifica || j.posicion}, overall ${j.overall}${modoColocar ? ' — click para ubicar acá' : ''}` : `Lugar ${i + 1} del banco, vacío${modoColocar ? ' — click para ubicar acá' : ''}`}
+            className={`h-16 rounded-xl border p-1.5 flex items-center justify-center text-center transition focus-visible:outline focus-visible:outline-sky-500 ${
+              j ? 'bg-[#0b1326] cursor-grab active:cursor-grabbing' : 'border-dashed cursor-pointer'
+            } ${seleccionado ? 'ring-1 ring-sky-400' : ''} ${slotSobrevolado === i || (modoColocar && !seleccionado) ? 'border-sky-400 scale-105' : 'border-slate-800'}`}
           >
             {j ? (
-              <div className="min-w-0">
-                <p className="text-xs font-bold text-slate-200 truncate">{j.nombre}</p>
-                <p className="text-[10px] text-slate-500">{j.posicion_especifica || j.posicion} · Ovr {j.overall}</p>
+              <div className="min-w-0 flex items-center gap-1">
+                <div className="min-w-0">
+                  <p className="text-xs font-bold text-slate-200 truncate">{j.nombre}</p>
+                  <p className="text-[10px] text-slate-400">{j.posicion_especifica || j.posicion} · Ovr {j.overall}</p>
+                </div>
+                <button
+                  onClick={(e) => { e.stopPropagation(); onToggleSeleccion(j.id_jugador); }}
+                  aria-label={seleccionado ? `Cancelar mover a ${j.nombre}` : `Mover a ${j.nombre}`}
+                  aria-pressed={seleccionado}
+                  title="Mover con teclado/click (alternativa a arrastrar)"
+                  className={`text-[9px] w-4 h-4 rounded flex items-center justify-center shrink-0 ${
+                    seleccionado ? 'bg-sky-400 text-slate-950' : 'bg-slate-800 text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  ⇄
+                </button>
               </div>
             ) : (
-              <span className="text-[10px] text-slate-600">Vacío</span>
+              <span className="text-[10px] text-slate-400">Vacío</span>
             )}
           </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );
@@ -130,6 +174,20 @@ export default function TacticasPage({ plantilla, setPlantilla, API_URL, idEquip
   const [asignacionManual, setAsignacionManual] = useState({});
   const [ordenBanco, setOrdenBanco] = useState([]); // ids de jugador, en el orden de sus 9 lugares fijos
   const [slotBancoSobrevolado, setSlotBancoSobrevolado] = useState(null);
+  // Alternativa a arrastrar con el mouse: "levantar" un jugador con un click
+  // o el teclado y después click/Enter en el destino — mismo patrón que ya
+  // usa PanelCambios en MatchDayPage para las sustituciones, acá aplicado a
+  // los 3 tipos de destino (cancha, banco, panel de reserva). Sin esto la
+  // interacción central de la página era 100% drag-and-drop nativo, sin
+  // ningún camino para teclado ni táctil confiable.
+  const [jugadorSeleccionado, setJugadorSeleccionado] = useState(null);
+
+  useEffect(() => {
+    if (jugadorSeleccionado == null) return;
+    const onKey = (e) => { if (e.key === 'Escape') setJugadorSeleccionado(null); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [jugadorSeleccionado]);
 
   // Trae la táctica ya guardada del equipo, para que al volver a esta
   // página (o recargar) se mantenga la formación/mentalidad/presión
@@ -224,10 +282,7 @@ export default function TacticasPage({ plantilla, setPlantilla, API_URL, idEquip
   //   suplente (o a reserva si el banco ya está lleno).
   // Si el jugador no coincide con la posición del slot, queda marcado como
   // fuera de posición (se resalta en amarillo al renderizar).
-  const soltarEnSlot = (e, slotIndex) => {
-    e.preventDefault();
-    setSlotSobrevolado(null);
-    const jugadorId = Number(e.dataTransfer.getData('text/plain'));
+  const moverASlot = (jugadorId, slotIndex) => {
     const jugador = plantilla.find((j) => j.id_jugador === jugadorId);
     if (!jugador) return;
     const ocupanteActual = alineacion[slotIndex];
@@ -272,13 +327,16 @@ export default function TacticasPage({ plantilla, setPlantilla, API_URL, idEquip
     if (jugador.rol !== 'TITULAR') cambiarRolLocal(jugador, 'TITULAR');
   };
 
+  const soltarEnSlot = (e, slotIndex) => {
+    e.preventDefault();
+    setSlotSobrevolado(null);
+    moverASlot(Number(e.dataTransfer.getData('text/plain')), slotIndex);
+  };
+
   // Suelta sobre un lugar puntual del banco de suplentes: si viene de otro
   // lugar del banco, reordena (swap); si viene de la cancha o de reserva,
   // ocupa ese lugar y, si ya había alguien ahí, lo manda a reserva.
-  const soltarEnBanco = (e, slotIndex) => {
-    e.preventDefault();
-    setSlotBancoSobrevolado(null);
-    const jugadorId = Number(e.dataTransfer.getData('text/plain'));
+  const moverABanco = (jugadorId, slotIndex) => {
     const jugador = plantilla.find((j) => j.id_jugador === jugadorId);
     if (!jugador) return;
 
@@ -312,15 +370,41 @@ export default function TacticasPage({ plantilla, setPlantilla, API_URL, idEquip
     }
   };
 
+  const soltarEnBanco = (e, slotIndex) => {
+    e.preventDefault();
+    setSlotBancoSobrevolado(null);
+    moverABanco(Number(e.dataTransfer.getData('text/plain')), slotIndex);
+  };
+
   // Acepta tanto bajar a alguien de la cancha (era TITULAR) como mover un
   // jugador al panel de Reserva (era TITULAR/SUPLENTE).
-  const soltarEnPanel = (e, rolDestino) => {
-    e.preventDefault();
-    setPanelSobrevolado(null);
-    const jugadorId = Number(e.dataTransfer.getData('text/plain'));
+  const moverAPanel = (jugadorId, rolDestino) => {
     const jugador = plantilla.find((j) => j.id_jugador === jugadorId);
     if (!jugador || jugador.rol === rolDestino) return;
     mandarAPanel(jugador, rolDestino);
+  };
+
+  const soltarEnPanel = (e, rolDestino) => {
+    e.preventDefault();
+    setPanelSobrevolado(null);
+    moverAPanel(Number(e.dataTransfer.getData('text/plain')), rolDestino);
+  };
+
+  // Único punto de entrada del modo teclado/click: "coloca" al jugador
+  // levantado (jugadorSeleccionado) en el destino elegido, sea cual sea su
+  // tipo, y cierra la selección. No hace nada si no hay nadie levantado —
+  // así los mismos manejadores de destino sirven aunque todavía no se
+  // seleccionó a nadie.
+  const colocarSeleccionadoEn = (tipo, arg) => {
+    if (jugadorSeleccionado == null) return;
+    if (tipo === 'slot') moverASlot(jugadorSeleccionado, arg);
+    else if (tipo === 'banco') moverABanco(jugadorSeleccionado, arg);
+    else if (tipo === 'panel') moverAPanel(jugadorSeleccionado, arg);
+    setJugadorSeleccionado(null);
+  };
+
+  const toggleSeleccion = (idJugador) => {
+    setJugadorSeleccionado((prev) => (prev === idJugador ? null : idJugador));
   };
 
   const guardarTactica = async () => {
@@ -354,16 +438,17 @@ export default function TacticasPage({ plantilla, setPlantilla, API_URL, idEquip
       <div className="bg-[#121e36] border border-slate-800 rounded-2xl p-5 space-y-4 h-fit">
         <h3 className="text-xs font-bold text-sky-400 uppercase">Estrategia y Controles</h3>
         <div>
-          <label className="text-xs text-slate-400 block mb-1">Formación</label>
-          <select value={formacion} onChange={(e) => setFormacion(e.target.value)} className="w-full bg-[#0b1326] border border-slate-700 p-2.5 rounded-xl text-xs text-white">
+          <label htmlFor="tacticas-formacion" className="text-xs text-slate-400 block mb-1">Formación</label>
+          <select id="tacticas-formacion" value={formacion} onChange={(e) => setFormacion(e.target.value)} className="w-full bg-[#0b1326] border border-slate-700 p-2.5 rounded-xl text-xs text-white">
             {Object.keys(FORMACIONES_SLOTS).map((f) => (
               <option key={f} value={f}>{FORMACIONES_LABEL[f]}</option>
             ))}
           </select>
+          <p className="text-[10px] text-slate-400 mt-1">Cambiar la formación reinicia las ubicaciones manuales que hayas hecho en la cancha.</p>
         </div>
         <div>
-          <label className="text-xs text-slate-400 block mb-1">Mentalidad</label>
-          <select value={mentalidad} onChange={(e) => setMentalidad(e.target.value)} className="w-full bg-[#0b1326] border border-slate-700 p-2.5 rounded-xl text-xs text-white">
+          <label htmlFor="tacticas-mentalidad" className="text-xs text-slate-400 block mb-1">Mentalidad</label>
+          <select id="tacticas-mentalidad" value={mentalidad} onChange={(e) => setMentalidad(e.target.value)} className="w-full bg-[#0b1326] border border-slate-700 p-2.5 rounded-xl text-xs text-white">
             <option value="ULTRA_DEFENSIVA">Ultra defensiva</option>
             <option value="DEFENSIVA">Defensiva</option>
             <option value="BALANCEADA">Balanceada</option>
@@ -372,8 +457,8 @@ export default function TacticasPage({ plantilla, setPlantilla, API_URL, idEquip
           </select>
         </div>
         <div>
-          <label className="text-xs text-slate-400 block mb-1">Presión</label>
-          <select value={presion} onChange={(e) => setPresion(e.target.value)} className="w-full bg-[#0b1326] border border-slate-700 p-2.5 rounded-xl text-xs text-white">
+          <label htmlFor="tacticas-presion" className="text-xs text-slate-400 block mb-1">Presión</label>
+          <select id="tacticas-presion" value={presion} onChange={(e) => setPresion(e.target.value)} className="w-full bg-[#0b1326] border border-slate-700 p-2.5 rounded-xl text-xs text-white">
             <option value="BAJA">Baja</option>
             <option value="MEDIA">Media</option>
             <option value="ALTA">Alta</option>
@@ -387,8 +472,10 @@ export default function TacticasPage({ plantilla, setPlantilla, API_URL, idEquip
           {guardando ? 'Guardando...' : 'Guardar Táctica'}
         </button>
         {mensajeGuardado && <p className="text-[11px] text-emerald-400">{mensajeGuardado}</p>}
-        <p className="text-[11px] text-slate-500 pt-2 border-t border-slate-800">
+        <p className="text-[11px] text-slate-400 pt-2 border-t border-slate-800">
           Arrastrá un jugador de los paneles a la cancha para hacerlo titular, o de la cancha a los paneles de suplentes o reserva para sacarlo. Vos elegís a quién reemplaza. Si lo ponés en una posición que no es la suya, la posición se marca en amarillo.
+          <br /><br />
+          Sin mouse: tocá <span className="text-sky-400 font-bold">⇄</span> en un jugador para levantarlo y después click (o Enter) en el destino. Escape cancela.
           <br /><br />
           Debajo de cada titular: <span className="text-sky-400 font-bold">D</span>efensivo / <span className="text-slate-300 font-bold">E</span>quilibrado / <span className="text-emerald-400 font-bold">O</span>fensivo — cuánto pesa ese jugador en ataque o en defensa durante el partido.
         </p>
@@ -402,14 +489,21 @@ export default function TacticasPage({ plantilla, setPlantilla, API_URL, idEquip
           {slots.map((slot, i) => {
             const j = alineacion[i];
             const fueraDePosicion = !!j && j.posicion !== slot.pos;
+            const seleccionado = !!j && jugadorSeleccionado === j.id_jugador;
+            const modoColocar = jugadorSeleccionado != null;
             return (
               <div
                 key={i}
                 onDragOver={(e) => { e.preventDefault(); setSlotSobrevolado(i); }}
                 onDragLeave={() => setSlotSobrevolado((s) => (s === i ? null : s))}
                 onDrop={(e) => soltarEnSlot(e, i)}
+                onClick={!j ? () => colocarSeleccionadoEn('slot', i) : undefined}
+                onKeyDown={!j ? (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); colocarSeleccionadoEn('slot', i); } } : undefined}
+                role={!j ? 'button' : undefined}
+                tabIndex={!j ? 0 : undefined}
+                aria-label={!j ? `Lugar vacío en cancha (${slot.posEspecifica || slot.pos})${modoColocar ? ' — click para ubicar acá' : ''}` : undefined}
                 style={{ left: `${slot.x}%`, top: `${slot.y}%` }}
-                className={`absolute -translate-x-1/2 -translate-y-1/2 flex flex-col items-center transition ${
+                className={`absolute -translate-x-1/2 -translate-y-1/2 flex flex-col items-center transition focus-visible:outline focus-visible:outline-sky-500 ${
                   slotSobrevolado === i ? 'scale-110' : ''
                 }`}
               >
@@ -418,7 +512,7 @@ export default function TacticasPage({ plantilla, setPlantilla, API_URL, idEquip
                     <div
                       draggable
                       onDragStart={(e) => { e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', String(j.id_jugador)); }}
-                      onClick={() => setJugadorDetalle(j)}
+                      onClick={() => { if (modoColocar) colocarSeleccionadoEn('slot', i); else setJugadorDetalle(j); }}
                       className="cursor-grab active:cursor-grabbing flex flex-col items-center gap-0.5"
                       title={
                         fueraDePosicion
@@ -427,8 +521,8 @@ export default function TacticasPage({ plantilla, setPlantilla, API_URL, idEquip
                       }
                     >
                       <span className={`px-2 py-0.5 rounded-full text-[10px] font-black shadow-lg border bg-[#121e36] text-white whitespace-nowrap ${
-                        fueraDePosicion ? 'border-amber-400' : 'border-sky-400'
-                      }`}>
+                        seleccionado ? 'ring-1 ring-sky-400' : ''
+                      } ${fueraDePosicion ? 'border-amber-400' : 'border-sky-400'}`}>
                         {iniciales(j.nombre)}
                       </span>
                       <span className="text-[9px] text-sky-300 font-bold bg-[#121e36]/80 px-1 rounded">{j.overall}</span>
@@ -438,7 +532,7 @@ export default function TacticasPage({ plantilla, setPlantilla, API_URL, idEquip
                         {slot.posEspecifica || slot.pos}
                       </span>
                     </div>
-                    <div className="flex gap-0.5 mt-0.5">
+                    <div className="flex gap-0.5 mt-0.5 items-center">
                       {[['DEFENSIVO', 'D'], ['EQUILIBRADO', 'E'], ['OFENSIVO', 'O']].map(([valor, letra]) => (
                         <button
                           key={valor}
@@ -451,18 +545,29 @@ export default function TacticasPage({ plantilla, setPlantilla, API_URL, idEquip
                                 : valor === 'DEFENSIVO'
                                   ? 'bg-sky-500 border-sky-400 text-slate-950'
                                   : 'bg-slate-500 border-slate-400 text-white'
-                              : 'bg-[#121e36] border-slate-700 text-slate-500 hover:border-slate-500'
+                              : 'bg-[#121e36] border-slate-700 text-slate-400 hover:border-slate-500'
                           }`}
                         >
                           {letra}
                         </button>
                       ))}
+                      <button
+                        onClick={(e) => { e.stopPropagation(); toggleSeleccion(j.id_jugador); }}
+                        aria-label={seleccionado ? `Cancelar mover a ${j.nombre}` : `Mover a ${j.nombre}`}
+                        aria-pressed={seleccionado}
+                        title="Mover con teclado/click (alternativa a arrastrar)"
+                        className={`w-3.5 h-3.5 rounded-sm text-[7px] font-black leading-none flex items-center justify-center ml-0.5 ${
+                          seleccionado ? 'bg-sky-400 text-slate-950' : 'bg-slate-800 text-slate-400 hover:text-slate-200'
+                        }`}
+                      >
+                        ⇄
+                      </button>
                     </div>
                   </>
                 ) : (
                   <div
-                    className={`w-9 h-9 rounded-full border-2 border-dashed flex items-center justify-center text-[9px] font-bold ${
-                      slotSobrevolado === i ? 'border-sky-400 text-sky-400' : 'border-slate-700 text-slate-600'
+                    className={`w-10 h-10 rounded-full border-2 border-dashed flex items-center justify-center text-[9px] font-bold ${
+                      slotSobrevolado === i || modoColocar ? 'border-sky-400 text-sky-400' : 'border-slate-700 text-slate-400'
                     }`}
                   >
                     {slot.posEspecifica || slot.pos}
@@ -480,6 +585,9 @@ export default function TacticasPage({ plantilla, setPlantilla, API_URL, idEquip
           onDragLeavePanel={(rol) => setPanelSobrevolado((s) => (s === rol ? null : s))}
           onDropPanel={soltarEnPanel}
           onVerFicha={setJugadorDetalle}
+          jugadorSeleccionado={jugadorSeleccionado}
+          onToggleSeleccion={toggleSeleccion}
+          onColocarAqui={(rol) => colocarSeleccionadoEn('panel', rol)}
           horizontal
         />
       </div>
@@ -492,6 +600,9 @@ export default function TacticasPage({ plantilla, setPlantilla, API_URL, idEquip
           onDragLeaveSlot={(i) => setSlotBancoSobrevolado((s) => (s === i ? null : s))}
           onDropSlot={soltarEnBanco}
           onVerFicha={setJugadorDetalle}
+          jugadorSeleccionado={jugadorSeleccionado}
+          onToggleSeleccion={toggleSeleccion}
+          onColocarEn={(i) => colocarSeleccionadoEn('banco', i)}
           vertical
         />
       </div>

@@ -14,7 +14,7 @@ from datetime import date, timedelta
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from models import Equipo, Jugador, OfertaFichaje, Mensaje
+from models import Equipo, Jugador, OfertaFichaje, Mensaje, AfiliacionClub
 from engine.transfer_engine import evaluar_oferta
 from engine.contract_engine import salario_esperado
 from engine.player_ai_engine import disposicion_fichar
@@ -50,8 +50,17 @@ async def ejecutar_ia_mercado(db: AsyncSession, log: list[str], fecha: date, id_
         if j.id_equipo:
             jugadores_por_equipo.setdefault(j.id_equipo, []).append(j)
 
+    clubes_influenciados = set((await db.execute(
+        select(AfiliacionClub.id_equipo_participado).where(
+            AfiliacionClub.id_partida == id_partida,
+            AfiliacionClub.influencia_habilitada == True,  # noqa: E712
+        )
+    )).scalars().all())
+
     for equipo in equipos:
         if equipo.es_usuario:
+            continue
+        if equipo.id_equipo in clubes_influenciados:
             continue
         if random.random() > PROB_INTENTO_POR_EQUIPO:
             continue

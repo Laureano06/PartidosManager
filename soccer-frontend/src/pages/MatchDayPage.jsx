@@ -190,6 +190,9 @@ export default function MatchDayPage({ API_URL, idPartida, idEquipoUsuario, fech
   const [golesFinalVisit, setGolesFinalVisit] = useState(0);
   const [mercadoIa, setMercadoIa] = useState([]);
   const [nuevaTemporada, setNuevaTemporada] = useState(false);
+  const [charlaDada, setCharlaDada] = useState(false);
+  const [resultadoCharla, setResultadoCharla] = useState(null);
+  const [dandoCharla, setDandoCharla] = useState(false);
 
   const [tiempoTranscurrido, setTiempoTranscurrido] = useState(0);
   const [eventosRevelados, setEventosRevelados] = useState([]);
@@ -212,6 +215,10 @@ export default function MatchDayPage({ API_URL, idPartida, idEquipoUsuario, fech
   // un partido nuevo (no en cada tiempo).
   const [cambiosRealizados, setCambiosRealizados] = useState(0);
   const [titularSeleccionado, setTitularSeleccionado] = useState(null);
+
+  // Marcaje individual: instrucción efímera para el próximo partido, no se
+  // persiste en ningún lado — solo vive acá mientras dura esta pantalla.
+  const [jugadorMarcado, setJugadorMarcado] = useState('');
 
   useEffect(() => {
     if (!idEquipoUsuario) return;
@@ -387,7 +394,10 @@ export default function MatchDayPage({ API_URL, idPartida, idEquipoUsuario, fech
       const res = await fetch(`${API_URL}/partidos/simular`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id_local: proximoPartido.id_local, id_visitante: proximoPartido.id_visitante }),
+        body: JSON.stringify({
+          id_local: proximoPartido.id_local, id_visitante: proximoPartido.id_visitante,
+          id_jugador_marcado: jugadorMarcado ? Number(jugadorMarcado) : null,
+        }),
       });
       const data = await res.json();
       setGolesFinalLocal(data.goles_local);
@@ -396,6 +406,8 @@ export default function MatchDayPage({ API_URL, idPartida, idEquipoUsuario, fech
       setEventosPrimerTiempo([]);
       setMercadoIa(data.mercado_ia || []);
       setNuevaTemporada(!!data.nueva_temporada);
+      setCharlaDada(false);
+      setResultadoCharla(null);
       setFase('resultado_rapido');
       if (onPartidoJugado) onPartidoJugado();
     } catch (error) {
@@ -412,7 +424,10 @@ export default function MatchDayPage({ API_URL, idPartida, idEquipoUsuario, fech
       const res = await fetch(`${API_URL}/partidos/simular-primer-tiempo`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id_local: proximoPartido.id_local, id_visitante: proximoPartido.id_visitante }),
+        body: JSON.stringify({
+          id_local: proximoPartido.id_local, id_visitante: proximoPartido.id_visitante,
+          id_jugador_marcado: jugadorMarcado ? Number(jugadorMarcado) : null,
+        }),
       });
       const data = await res.json();
       setEventosPrimerTiempo(data.eventos || []);
@@ -422,6 +437,8 @@ export default function MatchDayPage({ API_URL, idPartida, idEquipoUsuario, fech
       setEventosRevelados([]);
       setPausado(false);
       setCambiosRealizados(0);
+      setCharlaDada(false);
+      setResultadoCharla(null);
       golesDisparados3d.current = new Set();
       setEventoGol3d(null);
       reaccionesDisparadas3d.current = new Set();
@@ -444,6 +461,7 @@ export default function MatchDayPage({ API_URL, idPartida, idEquipoUsuario, fech
         body: JSON.stringify({
           id_local: proximoPartido.id_local, id_visitante: proximoPartido.id_visitante,
           goles_local: golesMedioLocal, goles_visitante: golesMedioVisit,
+          id_jugador_marcado: jugadorMarcado ? Number(jugadorMarcado) : null,
         }),
       });
       const data = await res.json();
@@ -461,6 +479,26 @@ export default function MatchDayPage({ API_URL, idPartida, idEquipoUsuario, fech
       console.error('Error jugando el segundo tiempo:', error);
     } finally {
       setProcesando(false);
+    }
+  };
+
+  const darCharla = async (tono) => {
+    setDandoCharla(true);
+    try {
+      const res = await fetch(`${API_URL}/partidos/charla`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id_fixture: proximoPartido.id_fixture, id_equipo: idEquipoUsuario, tono }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setResultadoCharla(data);
+        setCharlaDada(true);
+      }
+    } catch (error) {
+      console.error('Error dando la charla post-partido:', error);
+    } finally {
+      setDandoCharla(false);
     }
   };
 
@@ -565,6 +603,26 @@ export default function MatchDayPage({ API_URL, idPartida, idEquipoUsuario, fech
               ))}
               {titulares.length === 0 && <p className="text-xs text-slate-500 col-span-full">No se pudo armar la alineación.</p>}
             </div>
+          </div>
+
+          <div className="bg-[#121e36] border border-slate-800 rounded-2xl p-6 space-y-2">
+            <h2 className="text-sm font-bold text-white">Marcaje individual</h2>
+            <p className="text-[11px] text-slate-400">
+              Elegí un rival para marcar de cerca en este partido: baja su aporte ofensivo, pero tu defensa cede un poco de solidez por reacomodarse para seguirlo.
+            </p>
+            <select
+              value={jugadorMarcado}
+              onChange={(e) => setJugadorMarcado(e.target.value)}
+              aria-label="Jugador rival a marcar de cerca"
+              className="w-full bg-[#0b1326] border border-slate-700 p-2.5 rounded-lg text-white text-xs"
+            >
+              <option value="">Sin marcaje especial</option>
+              {titularesRival
+                .filter((j) => j.posicion === 'DEL' || j.posicion === 'MED')
+                .map((j) => (
+                  <option key={j.id_jugador} value={j.id_jugador}>{j.nombre} ({j.posicion_especifica || j.posicion})</option>
+                ))}
+            </select>
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -730,6 +788,33 @@ export default function MatchDayPage({ API_URL, idPartida, idEquipoUsuario, fech
               <p className="text-xs text-sky-300 font-bold">Terminó la temporada — se armó el fixture nuevo. Revisá tu plantel en el Centro de Desarrollo.</p>
             </div>
           )}
+          <div className="border-t border-slate-800 pt-4 mt-4">
+            <h4 className="text-xs font-bold text-sky-400 uppercase tracking-wider mb-2">Charla post-partido</h4>
+            {charlaDada ? (
+              <p className="text-xs text-slate-300">
+                {resultadoCharla && (resultadoCharla.delta >= 0
+                  ? `Le diste al plantel el mensaje justo — moral ${resultadoCharla.delta >= 0 ? '+' : ''}${resultadoCharla.delta}.`
+                  : `El mensaje no encajó con el resultado — moral ${resultadoCharla.delta}.`)}
+              </p>
+            ) : (
+              <div className="flex gap-2 flex-wrap">
+                {[
+                  { tono: 'EFUSIVA', label: 'Efusiva' },
+                  { tono: 'CALMA', label: 'Calma' },
+                  { tono: 'EXIGENTE', label: 'Exigente' },
+                ].map(({ tono, label }) => (
+                  <button
+                    key={tono}
+                    onClick={() => darCharla(tono)}
+                    disabled={dandoCharla}
+                    className="bg-slate-800 hover:bg-sky-500 hover:text-slate-950 disabled:opacity-50 text-slate-300 font-bold px-3 py-2 rounded-lg text-xs"
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       )}
     </div>

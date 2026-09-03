@@ -171,8 +171,12 @@ export default function CanchaJugable() {
     const teclas = new Set();
     const alApretar = (e) => teclas.add(e.key.toLowerCase());
     const alSoltar = (e) => teclas.delete(e.key.toLowerCase());
-    window.addEventListener('keydown', alApretar);
-    window.addEventListener('keyup', alSoltar);
+    // Escuchado en el contenedor (que ya tiene tabIndex) y no en window: así
+    // el WASD no se cuela sobre otro input con foco en el resto de la app.
+    // Se enfoca al montar para no perder el "tocás WASD y anda" de antes.
+    contenedor.addEventListener('keydown', alApretar);
+    contenedor.addEventListener('keyup', alSoltar);
+    contenedor.focus();
 
     const velocidad = new THREE.Vector2(0, 0);
     let anguloActual = 0;
@@ -251,8 +255,8 @@ export default function CanchaJugable() {
 
     return () => {
       vivo = false;
-      window.removeEventListener('keydown', alApretar);
-      window.removeEventListener('keyup', alSoltar);
+      contenedor.removeEventListener('keydown', alApretar);
+      contenedor.removeEventListener('keyup', alSoltar);
       window.removeEventListener('resize', alRedimensionar);
       renderer.dispose();
       escena.traverse((obj) => {

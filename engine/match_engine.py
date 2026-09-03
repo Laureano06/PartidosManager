@@ -65,7 +65,8 @@ def team_power(players: list[dict]) -> dict:
 
 def _pick_scorer(players: list[dict]) -> dict:
     pool = [p for p in players if p["posicion"] in ("DEL", "MED")] or players
-    return random.choice(pool)
+    pesos = [max(1, p["ataque"]) for p in pool]
+    return random.choices(pool, weights=pesos, k=1)[0]
 
 
 def simulate_match(
@@ -80,6 +81,8 @@ def simulate_match(
     minuto_fin: int = 90,
     gh_inicial: int = 0,
     gv_inicial: int = 0,
+    factor_medico_local: float = 1.0,
+    factor_medico_visit: float = 1.0,
 ) -> dict:
     """
     players: lista de dicts con al menos id_jugador, nombre, posicion, ataque,
@@ -194,13 +197,22 @@ def simulate_match(
 
         # lesiones (chequeo liviano, no todos los minutos para no saturar)
         if minuto % 7 == 0:
-            for p in local_players + visit_players:
+            for p in local_players:
                 energia_actual = p["energia"] - energia_gastada.get(p["id_jugador"], 0)
-                lesion = evaluar_lesion(energia_actual)
+                lesion = evaluar_lesion(energia_actual, factor_medico_local)
                 if lesion:
                     lesiones.append({"id_jugador": p["id_jugador"], "nombre": p["nombre"], **lesion})
                     events.append({"minuto": minuto, "tipo": "LESION",
-                                    "equipo": "local" if p in local_players else "visitante",
+                                    "equipo": "local",
+                                    "jugador": p["nombre"],
+                                    "texto": f"{p['nombre']} se resiente físicamente y no puede continuar."})
+            for p in visit_players:
+                energia_actual = p["energia"] - energia_gastada.get(p["id_jugador"], 0)
+                lesion = evaluar_lesion(energia_actual, factor_medico_visit)
+                if lesion:
+                    lesiones.append({"id_jugador": p["id_jugador"], "nombre": p["nombre"], **lesion})
+                    events.append({"minuto": minuto, "tipo": "LESION",
+                                    "equipo": "visitante",
                                     "jugador": p["nombre"],
                                     "texto": f"{p['nombre']} se resiente físicamente y no puede continuar."})
 
