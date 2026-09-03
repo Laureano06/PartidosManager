@@ -118,6 +118,12 @@ class EntrenamientoIn(BaseModel):
     intensidad: str
 
 
+class CharlaEquipoIn(BaseModel):
+    id_fixture: int
+    id_equipo: int
+    tono: str
+
+
 class EntrenamientoIndividualIn(BaseModel):
     id_jugador: int
     foco: str | None = None

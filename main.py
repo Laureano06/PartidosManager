@@ -17,7 +17,7 @@ from models import (
     CicloTemporada, OfertaClubDT, AfiliacionClub, SolicitudParticipacion, AddOnTransferencia,
 )
 from schemas import (
-    EquipoOut, JugadorOut, LigaOut, TacticaIn, EntrenamientoIn, EntrenamientoIndividualIn, CapitanIn,
+    EquipoOut, JugadorOut, LigaOut, TacticaIn, EntrenamientoIn, EntrenamientoIndividualIn, CapitanIn, CharlaEquipoIn,
     OfertaIn, RespuestaOfertaIn, SimularJornadaIn,
     RenovarContratoIn, PrecontratoIn, FicharLibreIn, NegociarContratoTraspasoIn,
     TransferibleIn, OfrecerJugadorIn, CederJugadorIn,
@@ -66,6 +66,7 @@ async def lifespan(app: FastAPI):
         "ALTER TABLE jugadores ADD COLUMN partidos_club_actual INTEGER DEFAULT 0",
         "ALTER TABLE jugadores ADD COLUMN foco_individual VARCHAR(12)",
         "ALTER TABLE equipos ADD COLUMN id_capitan INTEGER",
+        "ALTER TABLE calendario ADD COLUMN charla_dada BOOLEAN DEFAULT 0",
     ):
         try:
             async with engine.begin() as conn:
@@ -1868,6 +1869,19 @@ def _aplicar_marcaje(dict_local: list[dict], dict_visit: list[dict], id_jugador_
             return
 
 
+TONOS_CHARLA = {"EFUSIVA": 0, "CALMA": 1, "EXIGENTE": 2}
+INDICE_CORRECTO_CHARLA = {"PERDIO": 0, "EMPATO": 1, "GANO": 2}
+DELTA_POR_DISTANCIA_CHARLA = {0: 4, 1: 1, 2: -3}
+
+
+def _delta_charla(tono: str, resultado: str) -> int:
+    """Charla post-partido: EFUSIVA es lo que corresponde si se perdió,
+    CALMA si empató, EXIGENTE si ganó — cuanto más lejos el tono elegido
+    del que corresponde, peor el efecto (puede hasta bajar la moral)."""
+    distancia = abs(TONOS_CHARLA[tono] - INDICE_CORRECTO_CHARLA[resultado])
+    return DELTA_POR_DISTANCIA_CHARLA[distancia]
+
+
 def _calcular_efectos_fisicos(
     plantel_local: list[Jugador], plantel_visit: list[Jugador], resultado: dict,
     factor_medico_local: float = 1.0, factor_medico_visit: float = 1.0,
@@ -2240,6 +2254,48 @@ async def simular_segundo_tiempo(datos: dict, db: AsyncSession = Depends(get_db)
         "mercado_ia": log_ia,
         "nueva_temporada": nueva_temporada,
     }
+
+
+# ---------- CHARLA POST-PARTIDO ----------
+@app.post("/partidos/charla", tags=["Simulación"])
+async def charla_equipo(datos: CharlaEquipoIn, db: AsyncSession = Depends(get_db)):
+    if datos.tono not in TONOS_CHARLA:
+        raise HTTPException(status_code=400, detail=f"Tono inválido, debe ser uno de {sorted(TONOS_CHARLA)}.")
+    fixture = await db.get(Calendario, datos.id_fixture)
+    if not fixture:
+        raise HTTPException(status_code=404, detail="Partido no encontrado")
+    if not fixture.jugado:
+        raise HTTPException(status_code=400, detail="Todavía no se jugó este partido.")
+    if fixture.charla_dada:
+        raise HTTPException(status_code=400, detail="Ya se le dio la charla post-partido a este equipo.")
+
+    if fixture.id_local == datos.id_equipo:
+        goles_propios, goles_rivales = fixture.goles_local, fixture.goles_visitante
+    elif fixture.id_visitante == datos.id_equipo:
+        goles_propios, goles_rivales = fixture.goles_visitante, fixture.goles_local
+    else:
+        raise HTTPException(status_code=400, detail="Ese equipo no jugó este partido.")
+
+    resultado = "GANO" if goles_propios > goles_rivales else "PERDIO" if goles_propios < goles_rivales else "EMPATO"
+    delta = _delta_charla(datos.tono, resultado)
+
+    jugadores = (await db.execute(
+        select(Jugador).where(Jugador.id_equipo == datos.id_equipo, Jugador.categoria == "PRIMERA")
+    )).scalars().all()
+    for j in jugadores:
+        j.moral = max(0, min(100, j.moral + delta))
+
+    fixture.charla_dada = True
+    fecha = await _fecha_actual(db, fixture.id_partida)
+    tono_texto = {"EFUSIVA": "efusiva", "CALMA": "calma", "EXIGENTE": "exigente"}[datos.tono]
+    signo = "+" if delta >= 0 else ""
+    await _crear_mensaje(
+        db, datos.id_equipo, "Cuerpo Técnico", "Charla post-partido",
+        f"Le diste una charla {tono_texto} al plantel — el efecto en la moral fue de {signo}{delta}.",
+        "ENTRENAMIENTO", fecha,
+    )
+    await db.commit()
+    return {"status": "ok", "delta": delta, "resultado": resultado}
 
 
 # ---------- SIMULAR JORNADA COMPLETA ----------

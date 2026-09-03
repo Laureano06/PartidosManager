@@ -413,6 +413,9 @@ class Calendario(Base):
     jugado: Mapped[bool] = mapped_column(Boolean, default=False)
     goles_local: Mapped[int | None] = mapped_column(Integer, nullable=True)
     goles_visitante: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Charla post-partido: se puede dar una sola vez por fixture (ver
+    # POST /partidos/charla) — evita inflar moral repitiéndola.
+    charla_dada: Mapped[bool] = mapped_column(Boolean, default=False)
 
     # LIGA | COPA. Un fixture de copa no actualiza la tabla doméstica.
     tipo: Mapped[str] = mapped_column(String(10), default="LIGA")
