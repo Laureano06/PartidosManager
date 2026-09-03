@@ -169,7 +169,7 @@ export default function Sidebar({ presupuesto, nombreClub, escudoUrl, confianzaD
         onClick={() => setMenuMovilAbierto(true)}
         aria-label="Abrir menú de navegación"
         aria-expanded={menuMovilAbierto}
-        className="sm:hidden fixed top-3 left-3 z-40 bg-[#121e36] border border-slate-700 text-white w-10 h-10 rounded-xl flex items-center justify-center shadow-lg"
+        className="sm:hidden fixed top-3 left-3 z-[60] bg-[#121e36] border border-slate-700 text-white w-10 h-10 rounded-xl flex items-center justify-center shadow-lg"
       >
         <span aria-hidden="true" className="text-lg leading-none">☰</span>
       </button>
@@ -179,7 +179,7 @@ export default function Sidebar({ presupuesto, nombreClub, escudoUrl, confianzaD
       </aside>
 
       {menuMovilAbierto && (
-        <div className="sm:hidden fixed inset-0 z-50 flex" onClick={() => setMenuMovilAbierto(false)}>
+        <div className="sm:hidden fixed inset-0 z-[60] flex" onClick={() => setMenuMovilAbierto(false)}>
           <div className="absolute inset-0 bg-black/70" />
           <nav
             aria-label="Navegación principal"
