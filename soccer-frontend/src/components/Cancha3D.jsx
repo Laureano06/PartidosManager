@@ -656,8 +656,16 @@ export default function Cancha3D({ formacionLocal = '4-4-2', formacionVisita = '
       escena.traverse((obj) => {
         if (obj.geometry) obj.geometry.dispose();
         if (obj.material) {
-          if (Array.isArray(obj.material)) obj.material.forEach((m) => m.dispose());
-          else obj.material.dispose();
+          // material.dispose() no cascadea a su .map: sin liberarlo a mano
+          // acá, las texturas de tribuna/publicidad/red/etiquetas de nombre
+          // (todas CanvasTexture creadas por montaje) se filtran en memoria
+          // de GPU en cada remonte de este componente — y se remonta al
+          // menos 2 veces por partido (un Cancha3D por cada mitad jugada).
+          const materiales = Array.isArray(obj.material) ? obj.material : [obj.material];
+          materiales.forEach((m) => {
+            if (m.map) m.map.dispose();
+            m.dispose();
+          });
         }
       });
       if (contenedor.contains(renderer.domElement)) contenedor.removeChild(renderer.domElement);

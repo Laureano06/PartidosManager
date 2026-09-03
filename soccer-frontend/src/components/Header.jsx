@@ -1,8 +1,24 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 
 export default function Header({ fechaActual, diaNumero, avanzarDia, esDiaDePartido, simularHasta, resultadoSimulacion }) {
   const [mostrarSelector, setMostrarSelector] = useState(false);
   const [fechaElegida, setFechaElegida] = useState('');
+  const popoverRef = useRef(null);
+
+  // Cierra con click afuera o Escape — presente en cada pantalla de la app,
+  // así que sin esto quedaba como el único popover del proyecto sin ninguna
+  // de las dos formas estándar de descartarlo.
+  useEffect(() => {
+    if (!mostrarSelector) return;
+    const onPointerDown = (e) => { if (popoverRef.current && !popoverRef.current.contains(e.target)) setMostrarSelector(false); };
+    const onKey = (e) => { if (e.key === 'Escape') setMostrarSelector(false); };
+    document.addEventListener('mousedown', onPointerDown);
+    window.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onPointerDown);
+      window.removeEventListener('keydown', onKey);
+    };
+  }, [mostrarSelector]);
 
   const formatearFecha = (date) => {
     return date.toLocaleDateString('es-ES', { day: 'numeric', month: 'long', year: 'numeric' });
@@ -44,9 +60,10 @@ export default function Header({ fechaActual, diaNumero, avanzarDia, esDiaDePart
         </button>
 
         {simularHasta && (
-          <div className="relative">
+          <div className="relative" ref={popoverRef}>
             <button
               onClick={() => setMostrarSelector((v) => !v)}
+              aria-expanded={mostrarSelector}
               className="font-black px-3 py-2 rounded-xl text-xs uppercase tracking-wider bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 cursor-pointer"
               title="Simular varios días de una hasta una fecha elegida"
             >
@@ -63,6 +80,7 @@ export default function Header({ fechaActual, diaNumero, avanzarDia, esDiaDePart
                   value={fechaElegida}
                   min={fechaMinima}
                   onChange={(e) => setFechaElegida(e.target.value)}
+                  aria-label="Fecha hasta la que simular"
                   className="w-full bg-[#0b1326] border border-slate-700 rounded-lg px-2 py-1.5 text-xs text-white"
                 />
                 <div className="flex gap-2">

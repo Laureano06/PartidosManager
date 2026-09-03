@@ -3,7 +3,17 @@ import React, { useEffect, useRef } from 'react';
 const FOCUSABLE_SELECTOR =
   'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
-export default function Modal({ open, onClose, children, labelledBy }) {
+// 'lg' es el tamaño histórico (ficha de jugador/partido: ocupa casi toda la
+// pantalla). 'sm' es para diálogos de formulario chicos que antes se
+// armaban a mano por archivo (sin role=dialog, focus trap ni Escape) — con
+// esto quedan con la misma accesibilidad que el resto sin forzarlos al
+// tamaño grande.
+const TAMANOS = {
+  lg: 'w-full h-full max-w-6xl max-h-[94vh]',
+  sm: 'w-full max-w-md',
+};
+
+export default function Modal({ open, onClose, children, labelledBy, size = 'lg' }) {
   const contentRef = useRef(null);
   const previousFocusRef = useRef(null);
 
@@ -62,7 +72,7 @@ export default function Modal({ open, onClose, children, labelledBy }) {
         aria-modal="true"
         aria-labelledby={labelledBy}
         tabIndex={-1}
-        className="bg-[#121e36] border border-slate-700 rounded-2xl shadow-2xl w-full h-full max-w-6xl max-h-[94vh] overflow-y-auto scroll-slide outline-none"
+        className={`bg-[#121e36] border border-slate-700 rounded-2xl shadow-2xl overflow-y-auto scroll-slide outline-none ${TAMANOS[size]}`}
         onClick={(e) => e.stopPropagation()}
       >
         {children}

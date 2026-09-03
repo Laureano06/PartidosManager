@@ -59,9 +59,11 @@ export default function Bandera({ pais, className = '' }) {
   return (
     <span
       title={pais}
+      role="img"
+      aria-label={pais}
       className={`inline-block w-5 h-[14px] rounded-[2px] overflow-hidden align-middle shrink-0 ring-1 ring-white/10 ${className}`}
     >
-      {React.cloneElement(svg, { className: 'w-full h-full block' })}
+      {React.cloneElement(svg, { className: 'w-full h-full block', 'aria-hidden': 'true' })}
     </span>
   );
 }

@@ -70,10 +70,10 @@ export default function ContractModal({ open, onClose, jugador, modo, API_URL, i
   };
 
   return (
-    <Modal open={open} onClose={onClose}>
+    <Modal open={open} onClose={onClose} labelledBy="contrato-modal-title">
       <div className="p-8 sm:p-12 max-w-xl mx-auto space-y-6">
         <div>
-          <h3 className="text-2xl font-bold text-white">{TITULOS[modo](jugador)}</h3>
+          <h3 id="contrato-modal-title" className="text-2xl font-bold text-white">{TITULOS[modo](jugador)}</h3>
           <p className="text-sm text-slate-400 mt-1">
             {jugador.club ? `${jugador.club} · ` : ''}Ronda {Math.min(ronda + 1, RONDAS_MAX)} de {RONDAS_MAX}
           </p>
@@ -83,8 +83,9 @@ export default function ContractModal({ open, onClose, jugador, modo, API_URL, i
           <div className="space-y-4 text-sm">
             <p className="text-slate-300">Salario actual: ${jugador.salario.toLocaleString('es-AR')}/semana</p>
             <div>
-              <label className="text-xs text-slate-400 block mb-1">Salario semanal ofrecido</label>
+              <label htmlFor="contrato-salario" className="text-xs text-slate-400 block mb-1">Salario semanal ofrecido</label>
               <MoneyInput
+                id="contrato-salario"
                 value={salario}
                 onChange={setSalario}
                 className="w-full bg-[#0b1326] border border-slate-700 p-3 rounded-xl text-white"
@@ -92,8 +93,8 @@ export default function ContractModal({ open, onClose, jugador, modo, API_URL, i
             </div>
             {modo === 'renovar' && (
               <div>
-                <label className="text-xs text-slate-400 block mb-1">Duración (años)</label>
-                <select value={anios} onChange={(e) => setAnios(Number(e.target.value))} className="w-full bg-[#0b1326] border border-slate-700 p-3 rounded-xl text-white">
+                <label htmlFor="contrato-anios" className="text-xs text-slate-400 block mb-1">Duración (años)</label>
+                <select id="contrato-anios" value={anios} onChange={(e) => setAnios(Number(e.target.value))} className="w-full bg-[#0b1326] border border-slate-700 p-3 rounded-xl text-white">
                   {[1, 2, 3, 4, 5].map((n) => <option key={n} value={n}>{n} año{n > 1 ? 's' : ''}</option>)}
                 </select>
               </div>
@@ -141,6 +142,12 @@ export default function ContractModal({ open, onClose, jugador, modo, API_URL, i
                   Hacer otra oferta
                 </button>
               </div>
+            )}
+
+            {respuesta.estado === 'CONTRAOFERTA' && ronda >= RONDAS_MAX && (
+              <p className="text-xs text-slate-400">
+                No llegaron a un acuerdo — se agotaron las {RONDAS_MAX} rondas de negociación.
+              </p>
             )}
 
             <button onClick={onClose} className="w-full bg-slate-800 text-slate-300 px-3 py-2.5 rounded-lg">

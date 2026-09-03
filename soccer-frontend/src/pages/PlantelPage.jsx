@@ -66,6 +66,7 @@ export default function PlantelPage({ plantilla, setPlantilla, API_URL, idEquipo
   // vino de la base.
   const [sortKey, setSortKey] = useState('rol');
   const [sortDir, setSortDir] = useState('asc');
+  const [error, setError] = useState(null);
   const { ref, dragHandlers } = useDragScroll();
 
   const [searchParams, setSearchParams] = useSearchParams();
@@ -94,6 +95,7 @@ export default function PlantelPage({ plantilla, setPlantilla, API_URL, idEquipo
     : (academia?.[categoriaActiva.toLowerCase()] || []);
 
   const moverCategoria = async (jugador, categoriaDestino) => {
+    setError(null);
     try {
       const r = await fetch(`${API_URL}/jugadores/${jugador.id_jugador}/categoria`, {
         method: 'POST',
@@ -102,7 +104,7 @@ export default function PlantelPage({ plantilla, setPlantilla, API_URL, idEquipo
       });
       if (!r.ok) {
         const err = await r.json().catch(() => ({}));
-        alert(err.detail || 'No se pudo mover al jugador de categoría.');
+        setError(err.detail || 'No se pudo mover al jugador de categoría.');
         return;
       }
       // El jugador deja la categoría actual — se saca de la vista local sin
@@ -112,8 +114,9 @@ export default function PlantelPage({ plantilla, setPlantilla, API_URL, idEquipo
       if (categoriaActiva === 'PRIMERA') {
         setPlantilla((prev) => prev.filter((j) => j.id_jugador !== jugador.id_jugador));
       }
-    } catch (error) {
-      console.error('Error moviendo de categoría:', error);
+    } catch (e) {
+      console.error('Error moviendo de categoría:', e);
+      setError('No se pudo conectar con el servidor.');
     }
   };
 
@@ -199,8 +202,14 @@ export default function PlantelPage({ plantilla, setPlantilla, API_URL, idEquipo
           ))}
         </div>
       </div>
+      {error && (
+        <div className="bg-rose-950/60 border border-rose-500/40 text-rose-300 rounded-xl p-3 text-xs flex items-center justify-between gap-3 shrink-0">
+          <span>{error}</span>
+          <button onClick={() => setError(null)} className="text-rose-300 hover:text-rose-100 font-bold shrink-0">✕</button>
+        </div>
+      )}
       {cargandoAcademia && categoriaActiva !== 'PRIMERA' && (
-        <p className="text-xs text-slate-500 shrink-0">Cargando Academia...</p>
+        <p className="text-xs text-slate-400 shrink-0">Cargando Academia...</p>
       )}
       <div ref={ref} {...dragHandlers} className="flex-1 min-h-0 overflow-auto scroll-slide cursor-grab">
         <table className="w-full text-left text-xs border-collapse">
@@ -210,7 +219,11 @@ export default function PlantelPage({ plantilla, setPlantilla, API_URL, idEquipo
                 <th
                   key={col.key || '_accion'}
                   onClick={col.key ? () => clickHeader(col.key) : undefined}
-                  className={`p-3 select-none whitespace-nowrap ${col.key ? 'cursor-pointer hover:text-sky-400 transition' : ''}`}
+                  onKeyDown={col.key ? (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); clickHeader(col.key); } } : undefined}
+                  tabIndex={col.key ? 0 : undefined}
+                  role={col.key ? 'columnheader' : undefined}
+                  aria-sort={col.key ? (sortKey === col.key ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none') : undefined}
+                  className={`p-3 select-none whitespace-nowrap ${col.key ? 'cursor-pointer hover:text-sky-400 transition focus-visible:outline focus-visible:outline-sky-500' : ''}`}
                 >
                   {col.label}
                   {sortKey === col.key && <span className="ml-1">{sortDir === 'asc' ? '▲' : '▼'}</span>}
@@ -223,7 +236,11 @@ export default function PlantelPage({ plantilla, setPlantilla, API_URL, idEquipo
               <tr
                 key={j.id_jugador}
                 onClick={() => setJugadorDetalle(j)}
-                className="border-b border-slate-800/40 hover:bg-[#0b1326]/60 cursor-pointer"
+                onKeyDown={(e) => { if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); setJugadorDetalle(j); } }}
+                role="button"
+                tabIndex={0}
+                aria-label={`Ver ficha de ${j.nombre}`}
+                className="border-b border-slate-800/40 hover:bg-[#0b1326]/60 cursor-pointer focus-visible:outline focus-visible:outline-sky-500"
               >
                 {categoriaActiva === 'PRIMERA' && (
                   <td className="p-3">
@@ -264,6 +281,7 @@ export default function PlantelPage({ plantilla, setPlantilla, API_URL, idEquipo
                           value=""
                           onClick={(e) => e.stopPropagation()}
                           onChange={(e) => { elegirAccion(j, e.target.value); e.target.value = ''; }}
+                          aria-label={`Acciones para ${j.nombre}`}
                           className="w-32 shrink-0 text-[10px] bg-slate-800 hover:bg-slate-700 text-sky-400 px-2 py-1 rounded font-bold border-none cursor-pointer"
                         >
                           <option value="" disabled>Acciones ▾</option>
@@ -286,6 +304,7 @@ export default function PlantelPage({ plantilla, setPlantilla, API_URL, idEquipo
                         value=""
                         onClick={(e) => e.stopPropagation()}
                         onChange={(e) => { elegirAccion(j, e.target.value); e.target.value = ''; }}
+                        aria-label={`Mover a ${j.nombre} de categoría`}
                         className="w-36 shrink-0 text-[10px] bg-slate-800 hover:bg-slate-700 text-sky-400 px-2 py-1 rounded font-bold border-none cursor-pointer"
                       >
                         <option value="" disabled>Mover a ▾</option>

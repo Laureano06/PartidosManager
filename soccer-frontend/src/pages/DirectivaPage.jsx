@@ -13,6 +13,7 @@ export default function DirectivaPage({ API_URL, idPartida, onEstadoCambiado }) 
   const [cargando, setCargando] = useState(true);
   const [confirmandoRenuncia, setConfirmandoRenuncia] = useState(false);
   const [renunciando, setRenunciando] = useState(false);
+  const [errorRenuncia, setErrorRenuncia] = useState(null);
 
   useEffect(() => {
     if (!idPartida) return;
@@ -32,17 +33,19 @@ export default function DirectivaPage({ API_URL, idPartida, onEstadoCambiado }) 
 
   const renunciar = async () => {
     setRenunciando(true);
+    setErrorRenuncia(null);
     try {
       const r = await fetch(`${API_URL}/partidas/${idPartida}/renunciar`, { method: 'POST' });
       if (!r.ok) {
         const err = await r.json().catch(() => ({}));
-        alert(err.detail || 'No se pudo renunciar.');
+        setErrorRenuncia(err.detail || 'No se pudo renunciar.');
         setRenunciando(false);
         return;
       }
       onEstadoCambiado?.();
     } catch (e) {
       console.error('Error renunciando:', e);
+      setErrorRenuncia('No se pudo conectar con el servidor.');
       setRenunciando(false);
     }
   };
@@ -77,14 +80,15 @@ export default function DirectivaPage({ API_URL, idPartida, onEstadoCambiado }) 
           {datos.contrato_dt_anios} año{datos.contrato_dt_anios === 1 ? '' : 's'} — vence en{' '}
           <span className="text-slate-200 font-bold">{formatearDuracion(datos.dias_restantes_contrato)}</span>
         </p>
-        <p className="text-[11px] text-slate-500">Trayectoria como DT (balance): {datos.balance_dt}/100</p>
+        <p className="text-[11px] text-slate-400">Trayectoria como DT (balance): {datos.balance_dt}/100</p>
       </div>
 
       <div className="bg-[#121e36] border border-slate-800 rounded-2xl p-6 space-y-3">
         <h2 className="text-sm font-bold text-white">Renunciar al cargo</h2>
-        <p className="text-[11px] text-slate-500">
+        <p className="text-[11px] text-slate-400">
           Dejás el club por tu cuenta. Otros clubes te van a ofrecer un puesto acorde a tu trayectoria como DT, no a tu club actual.
         </p>
+        {errorRenuncia && <p className="text-xs text-rose-400">{errorRenuncia}</p>}
         {!confirmandoRenuncia ? (
           <button
             onClick={() => setConfirmandoRenuncia(true)}
