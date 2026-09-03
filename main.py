@@ -17,7 +17,7 @@ from models import (
     CicloTemporada, OfertaClubDT, AfiliacionClub, SolicitudParticipacion, AddOnTransferencia,
 )
 from schemas import (
-    EquipoOut, JugadorOut, LigaOut, TacticaIn, EntrenamientoIn, EntrenamientoIndividualIn,
+    EquipoOut, JugadorOut, LigaOut, TacticaIn, EntrenamientoIn, EntrenamientoIndividualIn, CapitanIn,
     OfertaIn, RespuestaOfertaIn, SimularJornadaIn,
     RenovarContratoIn, PrecontratoIn, FicharLibreIn, NegociarContratoTraspasoIn,
     TransferibleIn, OfrecerJugadorIn, CederJugadorIn,
@@ -65,6 +65,7 @@ async def lifespan(app: FastAPI):
         "ALTER TABLE jugadores ADD COLUMN porcentaje_reventa INTEGER",
         "ALTER TABLE jugadores ADD COLUMN partidos_club_actual INTEGER DEFAULT 0",
         "ALTER TABLE jugadores ADD COLUMN foco_individual VARCHAR(12)",
+        "ALTER TABLE equipos ADD COLUMN id_capitan INTEGER",
     ):
         try:
             async with engine.begin() as conn:
@@ -1263,6 +1264,8 @@ async def _procesar_partidos_ajenos_del_dia(db: AsyncSession, fecha: date, id_pa
                         "ataque": p.ataque, "defensa": p.defensa, "energia": p.energia, "duty": p.duty} for p in jl]
         dict_visit = [{"id_jugador": p.id_jugador, "nombre": p.nombre, "posicion": p.posicion,
                         "ataque": p.ataque, "defensa": p.defensa, "energia": p.energia, "duty": p.duty} for p in jv]
+        _aplicar_vestuario(dict_local, plantel_local, local.id_capitan)
+        _aplicar_vestuario(dict_visit, plantel_visit, visit.id_capitan)
         tac_local_dict = {"formacion": tac_local.formacion, "mentalidad": tac_local.mentalidad, "presion": tac_local.presion}
         tac_visit_dict = {"formacion": tac_visit.formacion, "mentalidad": tac_visit.mentalidad, "presion": tac_visit.presion}
         fm_local = _factor_medico(bonos_red.get(f.id_local))
@@ -1784,6 +1787,37 @@ def _once_titular(plantel: list[Jugador]) -> list[Jugador]:
     return titulares + suplentes[:11 - len(titulares)]
 
 
+MULTIPLICADOR_VESTUARIO_MIN = 0.95
+MULTIPLICADOR_VESTUARIO_RANGO = 0.10
+ATENUACION_LIDERAZGO_CAPITAN = 0.4
+
+
+def _puntaje_vestuario(plantel: list[Jugador], id_capitan: int | None) -> float:
+    """Dinámica de vestuario (0-100): moral promedio del plantel PRIMERA,
+    penalizada si el plantel está muy dividido de ánimo (desviación
+    estándar alta) — un capitán con buen liderazgo atenúa ese castigo."""
+    morales = [j.moral for j in plantel if j.categoria == "PRIMERA"]
+    if not morales:
+        return 75.0
+    promedio = sum(morales) / len(morales)
+    varianza = sum((m - promedio) ** 2 for m in morales) / len(morales)
+    desviacion = varianza ** 0.5
+    capitan = next((j for j in plantel if j.id_jugador == id_capitan), None) if id_capitan else None
+    atenuacion = 1 - (capitan.liderazgo / 100 * ATENUACION_LIDERAZGO_CAPITAN) if capitan else 1.0
+    return max(0.0, min(100.0, promedio - desviacion * atenuacion))
+
+
+def _aplicar_vestuario(dict_equipo: list[dict], plantel: list[Jugador], id_capitan: int | None) -> None:
+    """Traduce el puntaje de vestuario en un multiplicador chico y parejo
+    de ataque/defensa para todo el equipo — a diferencia del marcaje
+    (ver _aplicar_marcaje), esto es una condición estructural del club:
+    corre en TODOS sus partidos, no solo en los que mira el usuario."""
+    mult = MULTIPLICADOR_VESTUARIO_MIN + (_puntaje_vestuario(plantel, id_capitan) / 100) * MULTIPLICADOR_VESTUARIO_RANGO
+    for p in dict_equipo:
+        p["ataque"] = round(p["ataque"] * mult)
+        p["defensa"] = round(p["defensa"] * mult)
+
+
 # ---------- HELPER: ARMAR ALINEACIÓN Y DATOS PARA SIMULAR ----------
 async def _preparar_lineup(db: AsyncSession, fixture: Calendario):
     local = await db.get(Equipo, fixture.id_local)
@@ -1801,6 +1835,8 @@ async def _preparar_lineup(db: AsyncSession, fixture: Calendario):
                     "ataque": p.ataque, "defensa": p.defensa, "energia": p.energia, "duty": p.duty} for p in jl]
     dict_visit = [{"id_jugador": p.id_jugador, "nombre": p.nombre, "posicion": p.posicion,
                     "ataque": p.ataque, "defensa": p.defensa, "energia": p.energia, "duty": p.duty} for p in jv]
+    _aplicar_vestuario(dict_local, plantel_local, local.id_capitan)
+    _aplicar_vestuario(dict_visit, plantel_visit, visit.id_capitan)
 
     tac_local_dict = {"formacion": tac_local.formacion, "mentalidad": tac_local.mentalidad, "presion": tac_local.presion}
     tac_visit_dict = {"formacion": tac_visit.formacion, "mentalidad": tac_visit.mentalidad, "presion": tac_visit.presion}
@@ -2077,6 +2113,8 @@ async def _cerrar_jornada_del_dia(db: AsyncSession, fixture: Calendario) -> tupl
                             "ataque": p.ataque, "defensa": p.defensa, "energia": p.energia, "duty": p.duty} for p in jl]
             dict_visit = [{"id_jugador": p.id_jugador, "nombre": p.nombre, "posicion": p.posicion,
                             "ataque": p.ataque, "defensa": p.defensa, "energia": p.energia, "duty": p.duty} for p in jv]
+            _aplicar_vestuario(dict_local, plantel_local, local.id_capitan)
+            _aplicar_vestuario(dict_visit, plantel_visit, visit.id_capitan)
             tac_local_dict = {"formacion": tac_local.formacion, "mentalidad": tac_local.mentalidad, "presion": tac_local.presion}
             tac_visit_dict = {"formacion": tac_visit.formacion, "mentalidad": tac_visit.mentalidad, "presion": tac_visit.presion}
 
@@ -3613,6 +3651,24 @@ def _consejo_entrenamiento(plantel: list[Jugador]) -> str:
     return f"Con la energía en buen nivel ({energia_prom:.0f}%), yo enfocaría el entrenamiento en {etiqueta} (promedio {valor:.0f}), que es lo más flojo del plantel ahora mismo."
 
 
+def _consejo_vestuario(plantel: list[Jugador], capitan: Jugador | None) -> str:
+    """Comentario del asistente sobre el estado del vestuario — puntaje,
+    qué tan dividido está el ánimo, y si conviene nombrar/cambiar capitán."""
+    primera = [j for j in plantel if j.categoria == "PRIMERA"]
+    if not primera:
+        return "Todavía no hay plantel para hablar del vestuario."
+    promedio = sum(j.moral for j in primera) / len(primera)
+    varianza = sum((j.moral - promedio) ** 2 for j in primera) / len(primera)
+    desviacion = varianza ** 0.5
+    if desviacion >= 15 and not capitan:
+        return f"El vestuario está bastante dividido de ánimo (moral entre {min(j.moral for j in primera)} y {max(j.moral for j in primera)}) — un capitán con buen liderazgo ayudaría a unificarlo."
+    if desviacion >= 15 and capitan:
+        return f"El plantel sigue algo dividido de ánimo, pero {capitan.nombre} (liderazgo {capitan.liderazgo}) está ayudando a sostener el vestuario."
+    if promedio < 55:
+        return f"La moral promedio del plantel está baja ({promedio:.0f}) — cuidado, un vestuario apagado rinde peor en la cancha."
+    return f"El vestuario está en buen estado (moral promedio {promedio:.0f}, ánimo parejo)."
+
+
 @app.get("/fichajes/recomendaciones", tags=["Transferencias"])
 async def recomendaciones_fichaje(id_equipo: int | None = None, id_partida: int | None = None, db: AsyncSession = Depends(get_db)):
     if id_equipo is None:
@@ -3760,6 +3816,23 @@ async def recomendaciones_fichaje(id_equipo: int | None = None, id_partida: int 
     }
 
 
+@app.post("/equipos/{id_equipo}/capitan", tags=["Cuerpo Técnico"])
+async def asignar_capitan(id_equipo: int, datos: CapitanIn, db: AsyncSession = Depends(get_db)):
+    """Capitán del plantel PRIMERA — su liderazgo atenúa el castigo de
+    vestuario cuando el ánimo del plantel está dividido, ver
+    _puntaje_vestuario. `id_jugador=None` quita el capitán."""
+    equipo = await db.get(Equipo, id_equipo)
+    if not equipo:
+        raise HTTPException(status_code=404, detail="Equipo no encontrado")
+    if datos.id_jugador is not None:
+        jugador = await db.get(Jugador, datos.id_jugador)
+        if not jugador or jugador.id_equipo != id_equipo or jugador.categoria != "PRIMERA":
+            raise HTTPException(status_code=400, detail="El capitán tiene que ser un jugador del plantel PRIMERA de este equipo.")
+    equipo.id_capitan = datos.id_jugador
+    await db.commit()
+    return {"status": "ok", "id_capitan": equipo.id_capitan}
+
+
 # ---------- CUERPO TÉCNICO + SCOUTING ----------
 @app.get("/equipos/{id_equipo}/cuerpo-tecnico", tags=["Cuerpo Técnico"])
 async def obtener_cuerpo_tecnico(id_equipo: int, db: AsyncSession = Depends(get_db)):
@@ -3805,12 +3878,22 @@ async def obtener_cuerpo_tecnico(id_equipo: int, db: AsyncSession = Depends(get_
         })
 
     plan = await db.get(PlanEntrenamiento, id_equipo)
+    capitan = next((j for j in plantel if j.id_jugador == equipo.id_capitan), None) if equipo.id_capitan else None
     return {
         "asistente": {"nombre": personal.nombre_asistente if personal else "?", "opinion": opinion},
         "entrenamiento": {
             "foco": plan.foco if plan else "EQUILIBRADO",
             "intensidad": plan.intensidad if plan else "MEDIA",
             "consejo": _consejo_entrenamiento(plantel),
+        },
+        "vestuario": {
+            "puntaje": round(_puntaje_vestuario(plantel, equipo.id_capitan)),
+            "consejo": _consejo_vestuario(plantel, capitan),
+            "capitan": {"id_jugador": capitan.id_jugador, "nombre": capitan.nombre} if capitan else None,
+            "plantel_primera": [
+                {"id_jugador": j.id_jugador, "nombre": j.nombre, "posicion": j.posicion}
+                for j in plantel if j.categoria == "PRIMERA"
+            ],
         },
         "ojeadores": ojeadores_out,
     }

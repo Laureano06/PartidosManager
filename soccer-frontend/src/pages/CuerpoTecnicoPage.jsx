@@ -29,6 +29,8 @@ export default function CuerpoTecnicoPage({ API_URL, idEquipoUsuario }) {
   const [intensidad, setIntensidad] = useState('MEDIA');
   const [guardandoEntrenamiento, setGuardandoEntrenamiento] = useState(false);
   const [error, setError] = useState(null);
+  const [capitanSeleccionado, setCapitanSeleccionado] = useState('');
+  const [guardandoCapitan, setGuardandoCapitan] = useState(false);
 
   const idJugadorPreseleccionado = searchParams.get('asignar');
 
@@ -41,6 +43,7 @@ export default function CuerpoTecnicoPage({ API_URL, idEquipoUsuario }) {
         setDatos(data);
         setFoco(data.entrenamiento.foco);
         setIntensidad(data.entrenamiento.intensidad);
+        setCapitanSeleccionado(data.vestuario?.capitan?.id_jugador ? String(data.vestuario.capitan.id_jugador) : '');
       })
       .catch((e) => console.error('Error cargando cuerpo técnico:', e))
       .finally(() => setCargando(false));
@@ -61,6 +64,22 @@ export default function CuerpoTecnicoPage({ API_URL, idEquipoUsuario }) {
       console.error('Error configurando entrenamiento:', e);
     } finally {
       setGuardandoEntrenamiento(false);
+    }
+  };
+
+  const guardarCapitan = async () => {
+    setGuardandoCapitan(true);
+    try {
+      await fetch(`${API_URL}/equipos/${idEquipoUsuario}/capitan`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id_jugador: capitanSeleccionado ? Number(capitanSeleccionado) : null }),
+      });
+      cargar();
+    } catch (e) {
+      console.error('Error asignando capitán:', e);
+    } finally {
+      setGuardandoCapitan(false);
     }
   };
 
@@ -181,6 +200,42 @@ export default function CuerpoTecnicoPage({ API_URL, idEquipoUsuario }) {
           </button>
         </div>
       </div>
+
+      {datos.vestuario && (
+        <div className="bg-[#121e36] border border-slate-800 rounded-2xl p-6 space-y-3">
+          <h2 className="text-xs font-bold text-sky-400 uppercase tracking-wider">Vestuario</h2>
+          <div className="flex items-center gap-3">
+            <div className="flex-1">
+              <BarraProgreso progreso={datos.vestuario.puntaje} />
+            </div>
+            <span className="text-sm font-bold text-white shrink-0">{datos.vestuario.puntaje}</span>
+          </div>
+          <p className="text-sm text-slate-300 leading-relaxed">{datos.vestuario.consejo}</p>
+          <div className="flex gap-3 items-end">
+            <div className="flex-1">
+              <label htmlFor="vestuario-capitan" className="text-xs text-slate-400 block mb-1">Capitán</label>
+              <select
+                id="vestuario-capitan"
+                value={capitanSeleccionado}
+                onChange={(e) => setCapitanSeleccionado(e.target.value)}
+                className="w-full bg-[#0b1326] border border-slate-700 p-2 rounded-lg text-white text-xs"
+              >
+                <option value="">Sin capitán</option>
+                {datos.vestuario.plantel_primera.map((j) => (
+                  <option key={j.id_jugador} value={j.id_jugador}>{j.nombre} ({j.posicion})</option>
+                ))}
+              </select>
+            </div>
+            <button
+              onClick={guardarCapitan}
+              disabled={guardandoCapitan}
+              className="bg-sky-500 hover:bg-sky-400 disabled:opacity-50 text-slate-950 font-bold px-4 py-2 rounded-lg text-xs shrink-0"
+            >
+              {guardandoCapitan ? 'Guardando...' : 'Guardar'}
+            </button>
+          </div>
+        </div>
+      )}
 
       <div className="bg-[#121e36] border border-slate-800 rounded-2xl p-6">
         <h2 className="text-sm font-bold text-white mb-1">Ojeadores</h2>

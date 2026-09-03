@@ -85,6 +85,11 @@ class EquipoOut(BaseModel):
     perdidos: int
     goles_favor: int
     goles_contra: int
+    id_capitan: int | None = None
+
+
+class CapitanIn(BaseModel):
+    id_jugador: int | None = None
 
 
 class ClubJugadorIn(BaseModel):

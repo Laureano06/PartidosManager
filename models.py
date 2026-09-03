@@ -113,6 +113,10 @@ class Equipo(Base):
     color: Mapped[str] = mapped_column(String(10), default="#173C2E")
     es_usuario: Mapped[bool] = mapped_column(Boolean, default=False)
     reputacion: Mapped[int] = mapped_column(Integer, default=50)
+    # Capitán del plantel PRIMERA (opcional): su liderazgo atenúa el
+    # castigo de vestuario cuando el ánimo del plantel está dividido —
+    # ver _puntaje_vestuario en main.py.
+    id_capitan: Mapped[int | None] = mapped_column(ForeignKey("jugadores.id_jugador"), nullable=True)
     # URL de escudo provista por un tercero (su propio hosting) al crear la
     # partida con datos personalizados — el juego solo la muestra con
     # <img>, nunca la descarga ni la aloja. NULL = sin escudo, se muestra
