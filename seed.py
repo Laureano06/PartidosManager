@@ -213,10 +213,6 @@ async def crear_partida(
 
     equipos_candidatos_usuario: list[Equipo] = []
     nivel_por_equipo: dict[int, float] = {}
-    # Ligas ficticias (no personalizadas) de esta partida — las afiliaciones
-    # multiclub curadas solo se siembran ahí, porque el código de club es
-    # recuperable del prefijo de Equipo.nombre (ver más abajo).
-    ligas_ficticias: set[str] = set()
 
     for codigo_liga in LIGAS:
         info = LIGAS[codigo_liga]
@@ -229,8 +225,6 @@ async def crear_partida(
         await session.flush()  # asigna id_liga
 
         es_custom = codigo_liga in (nombres_clubes_custom or {})
-        if not es_custom:
-            ligas_ficticias.add(codigo_liga)
         clubes = (nombres_clubes_custom or {}).get(codigo_liga) or CLUB_NAMES[codigo_liga]
         niveles = [nivel_club(i, len(clubes)) for i in range(len(clubes))]
 
@@ -302,30 +296,33 @@ async def crear_partida(
 
     # Afiliaciones multiclub curadas (ver engine/multiclub_engine.py) — recién
     # acá existen TODOS los Equipo de TODAS las ligas (los pares curados
-    # cruzan liga, ej. MANC es ING1 pero GIR es ESP1), y solo tiene sentido
-    # en ligas ficticias (en "datos personalizados" el código de club no es
-    # recuperable del nombre, que es el nombre real tal cual lo subió el usuario).
-    if ligas_ficticias:
-        filas = (await session.execute(
-            select(Equipo, Liga.codigo).join(Liga, Equipo.id_liga == Liga.id_liga)
-            .where(Liga.id_partida == partida.id_partida, Liga.codigo.in_(ligas_ficticias))
-        )).all()
-        equipo_por_clave = {(codigo_liga_eq, eq.nombre.split(" - ", 1)[0]): eq for eq, codigo_liga_eq in filas}
+    # cruzan liga, ej. MANC es ING1 pero GIR es ESP1). Se busca por el
+    # prefijo "CODIGO - " de Equipo.nombre en TODAS las ligas, no solo las
+    # ficticias: en "datos personalizados" el código no lo antepone el
+    # juego, pero si el propio nombre subido por el usuario ya lo trae
+    # (ej. "MANC - Manchester City"), el match funciona igual. Si no lo
+    # trae, este club simplemente no matchea ninguna clave curada — no
+    # rompe nada, solo no se siembra ahí.
+    filas = (await session.execute(
+        select(Equipo, Liga.codigo).join(Liga, Equipo.id_liga == Liga.id_liga)
+        .where(Liga.id_partida == partida.id_partida)
+    )).all()
+    equipo_por_clave = {(codigo_liga_eq, eq.nombre.split(" - ", 1)[0]): eq for eq, codigo_liga_eq in filas}
 
-        for rel in AFILIACIONES_CURADAS:
-            inv = equipo_por_clave.get((rel["liga_inversor"], rel["codigo_inversor"]))
-            part = equipo_por_clave.get((rel["liga_participado"], rel["codigo_participado"]))
-            if inv and part:
-                session.add(AfiliacionClub(
-                    id_partida=partida.id_partida, id_equipo_inversor=inv.id_equipo, id_equipo_participado=part.id_equipo,
-                    porcentaje=rel["porcentaje"], tipo_relacion=rel["tipo"], fecha_adquisicion=FECHA_BASE_CONTRATOS,
-                ))
+    for rel in AFILIACIONES_CURADAS:
+        inv = equipo_por_clave.get((rel["liga_inversor"], rel["codigo_inversor"]))
+        part = equipo_por_clave.get((rel["liga_participado"], rel["codigo_participado"]))
+        if inv and part:
+            session.add(AfiliacionClub(
+                id_partida=partida.id_partida, id_equipo_inversor=inv.id_equipo, id_equipo_participado=part.id_equipo,
+                porcentaje=rel["porcentaje"], tipo_relacion=rel["tipo"], fecha_adquisicion=FECHA_BASE_CONTRATOS,
+            ))
 
-        for grupo in GRUPOS_MARCA_CURADOS:
-            for liga_codigo, club_codigo in grupo["miembros"]:
-                eq = equipo_por_clave.get((liga_codigo, club_codigo))
-                if eq:
-                    eq.red_marca = grupo["grupo_marca"]
+    for grupo in GRUPOS_MARCA_CURADOS:
+        for liga_codigo, club_codigo in grupo["miembros"]:
+            eq = equipo_por_clave.get((liga_codigo, club_codigo))
+            if eq:
+                eq.red_marca = grupo["grupo_marca"]
 
     # Elegir el club del usuario: por nombre exacto si se pasó, si no al azar
     # entre los candidatos (los de la liga elegida, o todos si no se eligió).
