@@ -7,14 +7,14 @@ from formato import money
 
 from fastapi import FastAPI, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy import select, or_, and_, update, delete, func
+from sqlalchemy import select, or_, and_, update, delete, func, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database import engine, Base, get_db
 from models import (
     Equipo, Jugador, Tactica, PlanEntrenamiento, Calendario, OfertaFichaje, Liga, Partida, Mensaje,
     HistorialTemporada, PaqueteClubes, EventoPartido, PersonalTecnico, Ojeador, ReporteScouting,
-    CicloTemporada, OfertaClubDT, AfiliacionClub, SolicitudParticipacion,
+    CicloTemporada, OfertaClubDT, AfiliacionClub, SolicitudParticipacion, AddOnTransferencia,
 )
 from schemas import (
     EquipoOut, JugadorOut, LigaOut, TacticaIn, EntrenamientoIn,
@@ -54,6 +54,22 @@ PROB_RENOVACION_IA = 0.75
 async def lifespan(app: FastAPI):
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+    # create_all crea tablas nuevas (como addons_transferencia) pero NO altera
+    # tablas que ya existían — no hay Alembic en este proyecto, así que las
+    # columnas nuevas sobre `jugadores` se agregan acá a mano. Cada ALTER va
+    # en su propia transacción: si ya existe (cualquier corrida después de la
+    # primera), esa sola falla y se descarta sin abortar ni afectar a las demás.
+    for stmt in (
+        "ALTER TABLE jugadores ADD COLUMN clausula_rescision INTEGER",
+        "ALTER TABLE jugadores ADD COLUMN id_club_reventa INTEGER",
+        "ALTER TABLE jugadores ADD COLUMN porcentaje_reventa INTEGER",
+        "ALTER TABLE jugadores ADD COLUMN partidos_club_actual INTEGER DEFAULT 0",
+    ):
+        try:
+            async with engine.begin() as conn:
+                await conn.execute(text(stmt))
+        except Exception:
+            pass
     print("Base de datos lista.")
     yield
     await engine.dispose()
@@ -435,10 +451,40 @@ async def _efectivizar_ofertas_pendientes(db: AsyncSession, fecha: date, id_part
         vendedor.presupuesto_salarios = tope_salarial(vendedor.presupuesto_fichajes)
         jugador.id_equipo = comprador.id_equipo
         jugador.rol = "RESERVA"
+        jugador.partidos_club_actual = 0
         if oferta.salario_pactado:
             # Contrato nuevo pactado con el jugador como parte del traspaso.
             jugador.salario = oferta.salario_pactado
             jugador.fecha_fin_contrato = fecha + timedelta(days=365 * 3)
+
+        # Reventa (sell-on): si un club anterior se había quedado con un % de
+        # la PRÓXIMA venta de este jugador, se cobra acá — el guard contra
+        # vendedor.id_equipo evita que se pague a sí mismo en la venta donde
+        # lo pidió (recién seteado por responder_oferta, vendedor==id_club_reventa
+        # en ESA venta), y a la vez hace que el campo sobreviva sin tocarlo
+        # hasta que dispare de verdad en la venta siguiente.
+        if jugador.id_club_reventa and jugador.id_club_reventa != vendedor.id_equipo and jugador.porcentaje_reventa:
+            monto_reventa = round(oferta.monto_oferta * jugador.porcentaje_reventa / 100)
+            club_reventa = await db.get(Equipo, jugador.id_club_reventa)
+            if club_reventa and monto_reventa > 0:
+                club_reventa.presupuesto_fichajes += monto_reventa
+                vendedor.presupuesto_fichajes -= monto_reventa
+                if club_reventa.es_usuario:
+                    await _crear_mensaje(
+                        db, club_reventa.id_equipo, "Secretaría Técnica", f"Reventa de {jugador.nombre}",
+                        f"Por la cláusula de reventa que te reservaste, cobrás ${money(monto_reventa)} "
+                        f"({jugador.porcentaje_reventa}%) de la venta de {jugador.nombre} a {comprador.nombre}.",
+                        "MERCADO", fecha,
+                    )
+                if vendedor.es_usuario:
+                    await _crear_mensaje(
+                        db, vendedor.id_equipo, "Secretaría Técnica", f"Cláusula de reventa descontada",
+                        f"De los ${money(oferta.monto_oferta)} de la venta de {jugador.nombre}, "
+                        f"${money(monto_reventa)} van para {club_reventa.nombre} por la cláusula de reventa pactada.",
+                        "MERCADO", fecha,
+                    )
+            jugador.id_club_reventa = None
+            jugador.porcentaje_reventa = None
 
         if comprador.es_usuario:
             await _crear_mensaje(
@@ -450,6 +496,47 @@ async def _efectivizar_ofertas_pendientes(db: AsyncSession, fecha: date, id_part
             await _crear_mensaje(
                 db, vendedor.id_equipo, "Secretaría Técnica", f"Se concretó la venta de {jugador.nombre}",
                 f"{comprador.nombre} pagó ${money(oferta.monto_oferta)} por {jugador.nombre}.",
+                "MERCADO", fecha,
+            )
+
+
+async def _procesar_addons_cumplidos(db: AsyncSession, ids_jugadores_que_jugaron: set[int] | list[int], fecha: date) -> None:
+    """Se corre después de aplicar los efectos físicos de cada partido (ver
+    _calcular_efectos_fisicos/_aplicar_efectos_fisicos, que ya incrementaron
+    partidos_club_actual): revisa si algún AddOnTransferencia pendiente de
+    esos jugadores llegó a su objetivo y, si sí, paga."""
+    if not ids_jugadores_que_jugaron:
+        return
+    pendientes = (await db.execute(
+        select(AddOnTransferencia, Jugador)
+        .join(Jugador, AddOnTransferencia.id_jugador == Jugador.id_jugador)
+        .where(
+            AddOnTransferencia.cumplido.is_(False),
+            AddOnTransferencia.id_jugador.in_(ids_jugadores_que_jugaron),
+        )
+    )).all()
+    for addon, jugador in pendientes:
+        if jugador.partidos_club_actual < addon.partidos_objetivo or not jugador.id_equipo:
+            continue
+        addon.cumplido = True
+        club_pagador = await db.get(Equipo, jugador.id_equipo)
+        club_beneficiario = await db.get(Equipo, addon.id_equipo_beneficiario)
+        if not club_pagador or not club_beneficiario:
+            continue
+        club_pagador.presupuesto_fichajes -= addon.monto
+        club_beneficiario.presupuesto_fichajes += addon.monto
+        if club_pagador.es_usuario:
+            await _crear_mensaje(
+                db, club_pagador.id_equipo, "Secretaría Técnica", f"Add-on activado: {jugador.nombre}",
+                f"{jugador.nombre} llegó a los {addon.partidos_objetivo} partidos pactados — se le pagan "
+                f"${money(addon.monto)} a {club_beneficiario.nombre} por el add-on de su transferencia.",
+                "MERCADO", fecha,
+            )
+        if club_beneficiario.es_usuario:
+            await _crear_mensaje(
+                db, club_beneficiario.id_equipo, "Secretaría Técnica", f"Cobraste un add-on: {jugador.nombre}",
+                f"{jugador.nombre} llegó a los {addon.partidos_objetivo} partidos con {club_pagador.nombre} — "
+                f"cobrás ${money(addon.monto)} del add-on pactado en su transferencia.",
                 "MERCADO", fecha,
             )
 
@@ -1146,6 +1233,7 @@ async def _procesar_partidos_ajenos_del_dia(db: AsyncSession, fecha: date, id_pa
             factor_medico_local=fm_local, factor_medico_visit=fm_visit,
         )
         _aplicar_efectos_fisicos(jl, jv, plantel_local, plantel_visit, resultado, fm_local, fm_visit)
+        await _procesar_addons_cumplidos(db, {p.id_jugador for p in jl + jv}, fecha)
         f.jugado = True
         f.goles_local = resultado["gh"]
         f.goles_visitante = resultado["gv"]
@@ -1727,6 +1815,7 @@ def _calcular_efectos_fisicos(
             "id_jugador": j.id_jugador, "energia": nueva_energia,
             "lesionado": nuevo_lesionado, "tipo_lesion": nuevo_tipo, "semanas_lesion": nuevas_semanas,
             "moral": nueva_moral,
+            "partidos_club_actual": (j.partidos_club_actual + 1) if jugo else j.partidos_club_actual,
         })
     return updates
 
@@ -1763,6 +1852,7 @@ def _aplicar_efectos_fisicos(
         u = updates_por_id[j.id_jugador]
         j.energia, j.lesionado, j.tipo_lesion, j.semanas_lesion = u["energia"], u["lesionado"], u["tipo_lesion"], u["semanas_lesion"]
         j.moral = u["moral"]
+        j.partidos_club_actual = u["partidos_club_actual"]
 
 
 async def _finalizar_fixture(db: AsyncSession, fixture: Calendario, local: Equipo, visit: Equipo, gh: int, gv: int) -> None:
@@ -1832,6 +1922,7 @@ async def _simular_y_finalizar(
     )
 
     _aplicar_efectos_fisicos(jl, jv, plantel_local, plantel_visit, resultado, fm_local, fm_visit)
+    await _procesar_addons_cumplidos(db, {p.id_jugador for p in jl + jv}, fixture.fecha)
     await _finalizar_fixture(db, fixture, local, visit, resultado["gh"], resultado["gv"])
 
     return {
@@ -1903,6 +1994,7 @@ async def _cerrar_jornada_del_dia(db: AsyncSession, fixture: Calendario) -> tupl
         updates_jugador: list[dict] = []
         updates_equipo: list[dict] = []
         updates_fixture: list[dict] = []
+        ids_jugaron_lote: set[int] = set()
 
         for otro in otros_pendientes:
             local = equipos_por_id.get(otro.id_local)
@@ -1932,6 +2024,7 @@ async def _cerrar_jornada_del_dia(db: AsyncSession, fixture: Calendario) -> tupl
             updates_jugador.extend(_calcular_efectos_fisicos(
                 plantel_local, plantel_visit, resultado, fm_local, fm_visit,
             ))
+            ids_jugaron_lote.update(p.id_jugador for p in jl + jv)
             if otro.tipo == "LIGA":
                 updates_equipo.append(_calcular_update_equipo(local, resultado["gh"], resultado["gv"]))
                 updates_equipo.append(_calcular_update_equipo(visit, resultado["gv"], resultado["gh"]))
@@ -1942,6 +2035,7 @@ async def _cerrar_jornada_del_dia(db: AsyncSession, fixture: Calendario) -> tupl
 
         if updates_jugador:
             await db.execute(update(Jugador), updates_jugador)
+            await _procesar_addons_cumplidos(db, ids_jugaron_lote, fixture.fecha)
         if updates_equipo:
             await db.execute(update(Equipo), updates_equipo)
         if updates_fixture:
@@ -2027,6 +2121,7 @@ async def simular_segundo_tiempo(datos: dict, db: AsyncSession = Depends(get_db)
     )
 
     _aplicar_efectos_fisicos(jl, jv, plantel_local, plantel_visit, resultado, fm_local, fm_visit)
+    await _procesar_addons_cumplidos(db, {p.id_jugador for p in jl + jv}, fixture.fecha)
     await _finalizar_fixture(db, fixture, local, visit, resultado["gh"], resultado["gv"])
     log_ia, nueva_temporada = await _cerrar_jornada_del_dia(db, fixture)
 
@@ -2319,6 +2414,18 @@ async def ofertar_fichaje(datos: OfertaIn, db: AsyncSession = Depends(get_db)):
                 "mensaje": f"La FIFA prohíbe transferencias internacionales de menores de 18 — {pais_vendedor} → {pais_comprador}.",
             }
 
+    # Cláusula de rescisión: el club no puede negarse si se paga el monto
+    # completo — se salta evaluar_oferta (rondas, demanda, intransferible)
+    # por completo, sea cual sea la ronda.
+    if jugador.clausula_rescision and datos.monto_oferta >= jugador.clausula_rescision:
+        if comprador.presupuesto_fichajes < jugador.clausula_rescision:
+            return {"estado": "RECHAZADA", "mensaje": "No tenés presupuesto suficiente."}
+        return {
+            "estado": "ACEPTADA_CLUB",
+            "mensaje": f"Pagaste la cláusula de rescisión (${money(jugador.clausula_rescision)}) — el club no puede negarse.",
+            "monto_acordado": jugador.clausula_rescision,
+        }
+
     resultado = evaluar_oferta(datos.monto_oferta, jugador.valor_mercado, es_clave=(jugador.rol == "TITULAR"), ronda=datos.ronda)
 
     if resultado["estado"] == "ACEPTADA":
@@ -2375,6 +2482,15 @@ async def negociar_contrato_traspaso(datos: NegociarContratoTraspasoIn, db: Asyn
             id_equipo_vendedor=vendedor.id_equipo, monto_oferta=datos.monto_oferta,
             salario_pactado=datos.salario_ofrecido, estado="ACEPTADA", efectivizada=False,
         ))
+        # Add-ons: pagos extra que el comprador ofreció como endulzante,
+        # atados a que el jugador sume partidos con su club nuevo — se
+        # cobran solos, ver _calcular_efectos_fisicos.
+        for addon in datos.addons:
+            if addon.partidos > 0 and addon.monto > 0:
+                db.add(AddOnTransferencia(
+                    id_jugador=jugador.id_jugador, id_equipo_beneficiario=vendedor.id_equipo,
+                    partidos_objetivo=addon.partidos, monto=addon.monto, cumplido=False,
+                ))
 
         fecha = await _fecha_actual(db, jugador.id_partida)
         texto = _texto_incorporacion(fecha)
@@ -2437,6 +2553,7 @@ async def renovar_contrato(datos: RenovarContratoIn, db: AsyncSession = Depends(
         fecha = await _fecha_actual(db, jugador.id_partida)
         jugador.salario = datos.salario_propuesto
         jugador.fecha_fin_contrato = fecha + timedelta(days=365 * datos.anios)
+        jugador.clausula_rescision = datos.clausula_rescision
         mensaje = f"{jugador.nombre} renovó contrato hasta el {jugador.fecha_fin_contrato.strftime('%d/%m/%Y')} por ${money(datos.salario_propuesto)}/semana."
         await _crear_mensaje(db, jugador.id_equipo, "Secretaría Técnica", f"Renovación: {jugador.nombre}", mensaje, "CONTRATO", fecha)
         await db.commit()
@@ -2480,6 +2597,7 @@ async def firmar_precontrato(datos: PrecontratoIn, db: AsyncSession = Depends(ge
     if resultado["estado"] == "ACEPTADA":
         jugador.id_equipo_precontrato = datos.id_equipo_destino
         jugador.salario_precontrato = datos.salario_ofrecido
+        jugador.clausula_rescision = datos.clausula_rescision
         mensaje = (
             f"{jugador.nombre} firmó precontrato con {equipo_destino.nombre if equipo_destino else '?'}. "
             f"Se incorporará libre el {jugador.fecha_fin_contrato.strftime('%d/%m/%Y')}."
@@ -2521,6 +2639,8 @@ async def fichar_libre(datos: FicharLibreIn, db: AsyncSession = Depends(get_db))
         jugador.salario = datos.salario_ofrecido
         jugador.fecha_fin_contrato = fecha + timedelta(days=365 * 3)
         jugador.rol = "RESERVA"
+        jugador.clausula_rescision = datos.clausula_rescision
+        jugador.partidos_club_actual = 0
         equipo = await db.get(Equipo, datos.id_equipo)
         mensaje = f"Fichaste libre a {jugador.nombre} por ${money(datos.salario_ofrecido)}/semana."
         if equipo and equipo.es_usuario:
@@ -2693,6 +2813,12 @@ async def responder_oferta(datos: RespuestaOfertaIn, db: AsyncSession = Depends(
         raise HTTPException(status_code=400, detail="No podés vender, tu plantilla quedaría muy corta.")
 
     oferta.estado = "ACEPTADA"
+    # Reventa: condición que pone el vendedor al aceptar, no algo que se
+    # negocie — se guarda en el jugador para que _efectivizar_ofertas_pendientes
+    # la cobre recién en la venta SIGUIENTE (no en esta).
+    if datos.porcentaje_reventa_solicitado and 0 < datos.porcentaje_reventa_solicitado <= 100:
+        jugador.id_club_reventa = vendedor.id_equipo
+        jugador.porcentaje_reventa = datos.porcentaje_reventa_solicitado
     texto = _texto_incorporacion(fecha)
     mensaje = f"Aceptaste vender a {jugador.nombre} a {comprador.nombre} por ${money(oferta.monto_oferta)}. Se hará efectivo {texto}."
     await _crear_mensaje(db, vendedor.id_equipo, "Secretaría Técnica", f"Venta acordada: {jugador.nombre}", mensaje, "MERCADO", fecha)
@@ -3918,6 +4044,7 @@ async def borrar_partida(id_partida: int, db: AsyncSession = Depends(get_db)):
         await db.execute(delete(Mensaje).where(Mensaje.id_equipo_destino.in_(equipo_ids)))
     if jugador_ids:
         await db.execute(delete(OfertaFichaje).where(OfertaFichaje.id_jugador.in_(jugador_ids)))
+        await db.execute(delete(AddOnTransferencia).where(AddOnTransferencia.id_jugador.in_(jugador_ids)))
     await db.execute(delete(HistorialTemporada).where(HistorialTemporada.id_partida == id_partida))
     if equipo_ids:
         await db.execute(delete(Tactica).where(Tactica.id_equipo.in_(equipo_ids)))

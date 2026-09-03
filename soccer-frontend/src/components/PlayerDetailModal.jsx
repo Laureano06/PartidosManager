@@ -228,6 +228,14 @@ export default function PlayerDetailModal({ jugador, open, onClose, API_URL, onN
                 A préstamo en {datos.club_prestamista || '?'}{datos.fin_cesion ? ` hasta ${new Date(`${datos.fin_cesion}T00:00:00`).toLocaleDateString('es-AR')}` : ''}
               </span>
             )}
+            {datos.clausula_rescision != null && (
+              <span
+                className="inline-block mt-3 ml-2 text-xs font-bold px-3 py-1 rounded-full border bg-rose-950 text-rose-300 border-rose-500/40"
+                title="Cualquier club que ofrezca este monto se lo lleva sin negociación"
+              >
+                Cláusula: ${datos.clausula_rescision.toLocaleString('es-AR')}
+              </span>
+            )}
           </div>
           <div className="flex flex-col items-end gap-1 shrink-0">
             <span className="bg-sky-500 text-slate-950 font-black text-2xl px-4 py-2 rounded-2xl">

@@ -293,6 +293,20 @@ class Jugador(Base):
     fin_cesion: Mapped[date | None] = mapped_column(Date, nullable=True)
     opcion_compra: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
+    # Precio de salida garantizado: cualquier club que ofrezca >= este monto
+    # se queda con el jugador sin negociación (ver /fichajes/ofertar). Se fija
+    # al renovar/precontrato/libre, como condición del jugador/representante.
+    clausula_rescision: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Reventa (sell-on): el club vendedor pide un % de lo que este jugador
+    # genere en su PRÓXIMA venta al aceptar una oferta recibida. Se consume
+    # (vuelve a None) apenas dispara una vez — ver _efectivizar_ofertas_pendientes.
+    id_club_reventa: Mapped[int | None] = mapped_column(ForeignKey("equipos.id_equipo"), nullable=True)
+    porcentaje_reventa: Mapped[int | None] = mapped_column(Integer, nullable=True)  # 1-100
+    # Partidos jugados con el club ACTUAL — se resetea a 0 en cada cambio de
+    # id_equipo. Solo existe para poder evaluar add-ons de transferencia
+    # (ver AddOnTransferencia y _calcular_efectos_fisicos).
+    partidos_club_actual: Mapped[int] = mapped_column(Integer, default=0)
+
     equipo: Mapped["Equipo"] = relationship(back_populates="jugadores", foreign_keys=[id_equipo])
 
     @property
@@ -431,6 +445,22 @@ class OfertaFichaje(Base):
     estado: Mapped[str] = mapped_column(String(20), default="PENDIENTE")  # PENDIENTE, ACEPTADA, RECHAZADA
     efectivizada: Mapped[bool] = mapped_column(Boolean, default=False)
     creado: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class AddOnTransferencia(Base):
+    """Pago extra pactado en una transferencia, atado a que el jugador sume
+    `partidos_objetivo` partidos jugados con el club comprador — se crea
+    junto al OfertaFichaje (ver /fichajes/negociar-contrato) y se cobra solo
+    cuando se cumple, procesando cada jornada (ver _calcular_efectos_fisicos
+    / _cerrar_jornada_del_dia en main.py)."""
+    __tablename__ = "addons_transferencia"
+
+    id_addon: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    id_jugador: Mapped[int] = mapped_column(ForeignKey("jugadores.id_jugador"))
+    id_equipo_beneficiario: Mapped[int] = mapped_column(ForeignKey("equipos.id_equipo"))  # vendedor original
+    partidos_objetivo: Mapped[int] = mapped_column(Integer)
+    monto: Mapped[int] = mapped_column(Integer)
+    cumplido: Mapped[bool] = mapped_column(Boolean, default=False)
 
 
 class HistorialTemporada(Base):

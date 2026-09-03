@@ -162,13 +162,16 @@ export default function TransferenciasPage({ API_URL, idEquipoUsuario, idPartida
   // ejecutarse directo al click.
   const [ofertaAConfirmar, setOfertaAConfirmar] = useState(null);
   const [confirmandoOferta, setConfirmandoOferta] = useState(false);
+  // % de reventa que pedís al vender — si el club comprador revende a este
+  // jugador más adelante, cobrás este % de esa venta (una sola vez).
+  const [porcentajeReventa, setPorcentajeReventa] = useState('');
 
-  const responderOfertaRecibida = async (idOferta, aceptar) => {
+  const responderOfertaRecibida = async (idOferta, aceptar, porcentajeReventaSolicitado) => {
     try {
       await fetch(`${API_URL}/fichajes/responder`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id_oferta: idOferta, aceptar }),
+        body: JSON.stringify({ id_oferta: idOferta, aceptar, porcentaje_reventa_solicitado: porcentajeReventaSolicitado || null }),
       });
       cargarNegociaciones();
       if (aceptar) { onPresupuestoCambiado?.(); onPlantillaCambiada?.(); }
@@ -180,9 +183,10 @@ export default function TransferenciasPage({ API_URL, idEquipoUsuario, idPartida
   const confirmarVenta = async () => {
     if (!ofertaAConfirmar) return;
     setConfirmandoOferta(true);
-    await responderOfertaRecibida(ofertaAConfirmar.id_oferta, true);
+    await responderOfertaRecibida(ofertaAConfirmar.id_oferta, true, Number(porcentajeReventa) || null);
     setConfirmandoOferta(false);
     setOfertaAConfirmar(null);
+    setPorcentajeReventa('');
   };
 
   // --- método 1: club -> jugador ---
@@ -909,11 +913,26 @@ export default function TransferenciasPage({ API_URL, idEquipoUsuario, idPartida
                           )}
                         </div>
                         {ofertaAConfirmar?.id_oferta === o.id_oferta && (
-                          <div className="bg-emerald-950/40 border border-emerald-500/40 rounded-lg p-3 flex items-center justify-between gap-3 flex-wrap">
+                          <div className="bg-emerald-950/40 border border-emerald-500/40 rounded-lg p-3 space-y-2">
                             <p className="text-emerald-300">
                               Confirmás la venta de <span className="font-bold">{o.nombre_jugador}</span> a {o.nombre_comprador} por ${o.monto_oferta.toLocaleString('es-AR')}. Sale de tu plantel.
                             </p>
-                            <div className="flex gap-2 shrink-0">
+                            <div className="flex items-center gap-2">
+                              <label htmlFor={`reventa-${o.id_oferta}`} className="text-[11px] text-emerald-300/80 shrink-0">
+                                % de reventa futura (opcional):
+                              </label>
+                              <input
+                                id={`reventa-${o.id_oferta}`}
+                                type="number" min="1" max="100" placeholder="0"
+                                value={porcentajeReventa}
+                                onChange={(e) => setPorcentajeReventa(e.target.value)}
+                                className="w-16 bg-[#0b1326] border border-slate-700 p-1.5 rounded-lg text-white text-[11px]"
+                              />
+                              <span className="text-[11px] text-emerald-300/80">
+                                — si {o.nombre_comprador} lo revende después, cobrás ese % de esa venta.
+                              </span>
+                            </div>
+                            <div className="flex gap-2 shrink-0 pt-1">
                               <button
                                 onClick={confirmarVenta}
                                 disabled={confirmandoOferta}
@@ -921,7 +940,11 @@ export default function TransferenciasPage({ API_URL, idEquipoUsuario, idPartida
                               >
                                 {confirmandoOferta ? 'Vendiendo...' : 'Sí, vender'}
                               </button>
-                              <button onClick={() => setOfertaAConfirmar(null)} disabled={confirmandoOferta} className="bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-slate-300 px-3 py-1.5 rounded-lg">
+                              <button
+                                onClick={() => { setOfertaAConfirmar(null); setPorcentajeReventa(''); }}
+                                disabled={confirmandoOferta}
+                                className="bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-slate-300 px-3 py-1.5 rounded-lg"
+                              >
                                 Cancelar
                               </button>
                             </div>

@@ -27,6 +27,7 @@ export default function ContractModal({ open, onClose, jugador, modo, API_URL, i
   const [ronda, setRonda] = useState(0);
   const [procesando, setProcesando] = useState(false);
   const [respuesta, setRespuesta] = useState(null);
+  const [clausulaRescision, setClausulaRescision] = useState('');
 
   useEffect(() => {
     if (jugador) {
@@ -34,6 +35,7 @@ export default function ContractModal({ open, onClose, jugador, modo, API_URL, i
       setSalario(String(sugerido));
       setRonda(0);
       setRespuesta(null);
+      setClausulaRescision(jugador.clausula_rescision ? String(jugador.clausula_rescision) : '');
     }
   }, [jugador, modo]);
 
@@ -45,11 +47,12 @@ export default function ContractModal({ open, onClose, jugador, modo, API_URL, i
     setProcesando(true);
     try {
       const endpoint = modo === 'renovar' ? '/contratos/renovar' : modo === 'precontrato' ? '/fichajes/precontrato' : '/fichajes/fichar-libre';
+      const clausula = clausulaRescision ? Number(clausulaRescision) : null;
       const body = modo === 'renovar'
-        ? { id_jugador: jugador.id_jugador, salario_propuesto: monto, anios, ronda }
+        ? { id_jugador: jugador.id_jugador, salario_propuesto: monto, anios, ronda, clausula_rescision: clausula }
         : modo === 'precontrato'
-        ? { id_jugador: jugador.id_jugador, id_equipo_destino: idEquipoUsuario, salario_ofrecido: monto, ronda }
-        : { id_jugador: jugador.id_jugador, id_equipo: idEquipoUsuario, salario_ofrecido: monto, ronda };
+        ? { id_jugador: jugador.id_jugador, id_equipo_destino: idEquipoUsuario, salario_ofrecido: monto, ronda, clausula_rescision: clausula }
+        : { id_jugador: jugador.id_jugador, id_equipo: idEquipoUsuario, salario_ofrecido: monto, ronda, clausula_rescision: clausula };
 
       const res = await fetch(`${API_URL}${endpoint}`, {
         method: 'POST',
@@ -99,6 +102,21 @@ export default function ContractModal({ open, onClose, jugador, modo, API_URL, i
                 </select>
               </div>
             )}
+            <div>
+              <label htmlFor="contrato-clausula" className="text-xs text-slate-400 block mb-1">
+                Cláusula de rescisión (opcional)
+              </label>
+              <MoneyInput
+                id="contrato-clausula"
+                value={clausulaRescision}
+                onChange={setClausulaRescision}
+                placeholder="Sin cláusula"
+                className="w-full bg-[#0b1326] border border-slate-700 p-3 rounded-xl text-white"
+              />
+              <p className="text-[10px] text-slate-400 mt-1">
+                Si la fijás, cualquier club que ofrezca ese monto se lo lleva sin negociar.
+              </p>
+            </div>
             <button
               onClick={() => enviar()}
               disabled={procesando}

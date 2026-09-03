@@ -55,6 +55,7 @@ class JugadorOut(BaseModel):
     id_equipo_dueno: int | None
     fin_cesion: date | None
     opcion_compra: int | None
+    clausula_rescision: int | None = None
 
 
 class LigaOut(BaseModel):
@@ -141,6 +142,15 @@ class OfertaIn(BaseModel):
 class RespuestaOfertaIn(BaseModel):
     id_oferta: int
     aceptar: bool
+    # Solo tiene efecto si aceptar=True: el vendedor pide quedarse con este %
+    # de lo que el jugador genere en su PRÓXIMA venta (se consume al disparar
+    # una vez — ver _efectivizar_ofertas_pendientes en main.py).
+    porcentaje_reventa_solicitado: int | None = None
+
+
+class AddOnIn(BaseModel):
+    partidos: int
+    monto: int
 
 
 class NegociarContratoTraspasoIn(BaseModel):
@@ -149,6 +159,7 @@ class NegociarContratoTraspasoIn(BaseModel):
     monto_oferta: int
     salario_ofrecido: int
     ronda: int = 0
+    addons: list[AddOnIn] = []
 
 
 class SimularJornadaIn(BaseModel):
@@ -161,6 +172,7 @@ class RenovarContratoIn(BaseModel):
     salario_propuesto: int
     anios: int = 3
     ronda: int = 0
+    clausula_rescision: int | None = None
 
 
 class PrecontratoIn(BaseModel):
@@ -168,6 +180,7 @@ class PrecontratoIn(BaseModel):
     id_equipo_destino: int
     salario_ofrecido: int
     ronda: int = 0
+    clausula_rescision: int | None = None
 
 
 class FicharLibreIn(BaseModel):
@@ -175,6 +188,7 @@ class FicharLibreIn(BaseModel):
     id_equipo: int
     salario_ofrecido: int
     ronda: int = 0
+    clausula_rescision: int | None = None
 
 
 class TransferibleIn(BaseModel):
