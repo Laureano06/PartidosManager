@@ -56,6 +56,7 @@ class JugadorOut(BaseModel):
     fin_cesion: date | None
     opcion_compra: int | None
     clausula_rescision: int | None = None
+    foco_individual: str | None = None
 
 
 class LigaOut(BaseModel):
@@ -110,6 +111,11 @@ class EntrenamientoIn(BaseModel):
     id_equipo: int
     foco: str
     intensidad: str
+
+
+class EntrenamientoIndividualIn(BaseModel):
+    id_jugador: int
+    foco: str | None = None
 
 
 class OfertaParticipacionIn(BaseModel):

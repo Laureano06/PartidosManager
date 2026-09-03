@@ -307,6 +307,11 @@ class Jugador(Base):
     # (ver AddOnTransferencia y _calcular_efectos_fisicos).
     partidos_club_actual: Mapped[int] = mapped_column(Integer, default=0)
 
+    # Foco de entrenamiento individual (OFENSIVO/DEFENSIVO/PASE/FISICO),
+    # además del plan grupal del equipo — progresa solo cada semana, ver
+    # _procesar_entrenamiento_individual.
+    foco_individual: Mapped[str | None] = mapped_column(String(12), nullable=True)
+
     equipo: Mapped["Equipo"] = relationship(back_populates="jugadores", foreign_keys=[id_equipo])
 
     @property

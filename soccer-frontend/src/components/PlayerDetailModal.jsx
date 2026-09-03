@@ -152,9 +152,13 @@ function RolesEfectivos({ jugador }) {
   );
 }
 
-export default function PlayerDetailModal({ jugador, open, onClose, API_URL, onNegociar, onRenovar, onPrecontrato, onFicharLibre, onToggleTransferible, onOfrecer, onCeder, onEnviarOjeador, onHablar }) {
+const FOCO_INDIVIDUAL_LABEL = { OFENSIVO: 'Ofensivo', DEFENSIVO: 'Defensivo', PASE: 'Pase', FISICO: 'Físico' };
+
+export default function PlayerDetailModal({ jugador, open, onClose, API_URL, onNegociar, onRenovar, onPrecontrato, onFicharLibre, onToggleTransferible, onOfrecer, onCeder, onEnviarOjeador, onHablar, onGuardarFocoIndividual }) {
   const [historial, setHistorial] = useState([]);
   const [detalle, setDetalle] = useState(null);
+  const [focoIndividualDraft, setFocoIndividualDraft] = useState('');
+  const [guardandoFoco, setGuardandoFoco] = useState(false);
 
   useEffect(() => {
     if (!open || !jugador?.id_jugador || !API_URL) { setHistorial([]); setDetalle(null); return; }
@@ -174,7 +178,20 @@ export default function PlayerDetailModal({ jugador, open, onClose, API_URL, onN
 
   const datos = useMemo(() => ({ ...jugador, ...detalle }), [jugador, detalle]);
 
+  useEffect(() => {
+    setFocoIndividualDraft(datos.foco_individual || '');
+  }, [datos.foco_individual]);
+
   if (!jugador) return null;
+
+  const guardarFocoIndividual = async () => {
+    setGuardandoFoco(true);
+    try {
+      await onGuardarFocoIndividual(focoIndividualDraft || null);
+    } finally {
+      setGuardandoFoco(false);
+    }
+  };
 
   const esLibre = datos.es_libre || datos.club === 'Agente Libre';
   const diasRestantes = datos.dias_restantes_contrato ?? datos.dias_restantes;
@@ -236,6 +253,14 @@ export default function PlayerDetailModal({ jugador, open, onClose, API_URL, onN
                 Cláusula: ${datos.clausula_rescision.toLocaleString('es-AR')}
               </span>
             )}
+            {datos.foco_individual && (
+              <span
+                className="inline-block mt-3 ml-2 text-xs font-bold px-3 py-1 rounded-full border bg-emerald-950 text-emerald-300 border-emerald-500/40"
+                title="Foco de entrenamiento individual, además del plan grupal del equipo"
+              >
+                Foco individual: {FOCO_INDIVIDUAL_LABEL[datos.foco_individual] || datos.foco_individual}
+              </span>
+            )}
           </div>
           <div className="flex flex-col items-end gap-1 shrink-0">
             <span className="bg-sky-500 text-slate-950 font-black text-2xl px-4 py-2 rounded-2xl">
@@ -255,6 +280,31 @@ export default function PlayerDetailModal({ jugador, open, onClose, API_URL, onN
               <Stat label="Valor" value={`$${(datos.val ?? datos.valor_mercado ?? 0).toLocaleString('es-AR')}`} />
               <Stat label="Salario/sem" value={`$${(datos.sal ?? datos.salario ?? 0).toLocaleString('es-AR')}`} />
             </div>
+
+            {onGuardarFocoIndividual && (
+              <div className="bg-[#0b1326] border border-slate-800 rounded-2xl p-4 space-y-2">
+                <h4 className="text-xs font-bold text-sky-400 uppercase tracking-wider">Entrenamiento individual</h4>
+                <p className="text-[10px] text-slate-400">Foco extra, además del plan grupal — progresa solo cada semana.</p>
+                <select
+                  value={focoIndividualDraft}
+                  onChange={(e) => setFocoIndividualDraft(e.target.value)}
+                  aria-label="Foco de entrenamiento individual"
+                  className="w-full bg-[#121e36] border border-slate-700 p-2 rounded-lg text-white text-xs"
+                >
+                  <option value="">Sin foco individual</option>
+                  {Object.entries(FOCO_INDIVIDUAL_LABEL).map(([valor, label]) => (
+                    <option key={valor} value={valor}>{label}</option>
+                  ))}
+                </select>
+                <button
+                  onClick={guardarFocoIndividual}
+                  disabled={guardandoFoco || focoIndividualDraft === (datos.foco_individual || '')}
+                  className="w-full bg-sky-500 hover:bg-sky-400 disabled:opacity-50 text-slate-950 font-bold px-3 py-2 rounded-lg text-xs"
+                >
+                  {guardandoFoco ? 'Guardando...' : 'Guardar foco individual'}
+                </button>
+              </div>
+            )}
           </div>
 
           <div className="space-y-4">

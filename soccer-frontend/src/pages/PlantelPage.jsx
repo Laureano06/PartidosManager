@@ -135,6 +135,20 @@ export default function PlantelPage({ plantilla, setPlantilla, API_URL, idEquipo
     }
   };
 
+  const guardarFocoIndividual = async (jugador, foco) => {
+    setPlantilla((prev) => prev.map((j) => (j.id_jugador === jugador.id_jugador ? { ...j, foco_individual: foco } : j)));
+    setJugadorDetalle((prev) => (prev && prev.id_jugador === jugador.id_jugador ? { ...prev, foco_individual: foco } : prev));
+    try {
+      await fetch(`${API_URL}/entrenamiento/individual`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id_jugador: jugador.id_jugador, foco }),
+      });
+    } catch (error) {
+      console.error('Error actualizando el foco de entrenamiento individual:', error);
+    }
+  };
+
   const elegirAccion = (jugador, accion) => {
     if (accion === 'renovar') setJugadorContrato(jugador);
     else if (accion === 'transferible') toggleTransferible(jugador);
@@ -328,6 +342,7 @@ export default function PlantelPage({ plantilla, setPlantilla, API_URL, idEquipo
         API_URL={API_URL}
         onRenovar={jugadorDetalle ? () => { setJugadorContrato(jugadorDetalle); setJugadorDetalle(null); } : undefined}
         onToggleTransferible={jugadorDetalle ? () => toggleTransferible(jugadorDetalle) : undefined}
+        onGuardarFocoIndividual={jugadorDetalle ? (foco) => guardarFocoIndividual(jugadorDetalle, foco) : undefined}
         onOfrecer={jugadorDetalle ? () => { setJugadorAOfrecer(jugadorDetalle); setJugadorDetalle(null); } : undefined}
         onCeder={jugadorDetalle ? () => { setJugadorACeder(jugadorDetalle); setJugadorDetalle(null); } : undefined}
         onHablar={jugadorDetalle ? () => { setJugadorADialogar(jugadorDetalle); setJugadorDetalle(null); } : undefined}

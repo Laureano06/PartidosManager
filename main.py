@@ -17,7 +17,7 @@ from models import (
     CicloTemporada, OfertaClubDT, AfiliacionClub, SolicitudParticipacion, AddOnTransferencia,
 )
 from schemas import (
-    EquipoOut, JugadorOut, LigaOut, TacticaIn, EntrenamientoIn,
+    EquipoOut, JugadorOut, LigaOut, TacticaIn, EntrenamientoIn, EntrenamientoIndividualIn,
     OfertaIn, RespuestaOfertaIn, SimularJornadaIn,
     RenovarContratoIn, PrecontratoIn, FicharLibreIn, NegociarContratoTraspasoIn,
     TransferibleIn, OfrecerJugadorIn, CederJugadorIn,
@@ -26,7 +26,7 @@ from schemas import (
 )
 from engine.match_engine import simulate_match
 from engine.transfer_engine import evaluar_oferta
-from engine.training_engine import aplicar_entrenamiento
+from engine.training_engine import aplicar_entrenamiento, recalcular_derivados_jugador, grupo_atributos
 from engine.season_engine import aplicar_desgaste, procesar_lesiones, procesar_fin_temporada, generar_regen
 from engine.ai_engine import ejecutar_ia_mercado
 from engine.transfer_window import ventana_activa, proxima_apertura
@@ -64,6 +64,7 @@ async def lifespan(app: FastAPI):
         "ALTER TABLE jugadores ADD COLUMN id_club_reventa INTEGER",
         "ALTER TABLE jugadores ADD COLUMN porcentaje_reventa INTEGER",
         "ALTER TABLE jugadores ADD COLUMN partidos_club_actual INTEGER DEFAULT 0",
+        "ALTER TABLE jugadores ADD COLUMN foco_individual VARCHAR(12)",
     ):
         try:
             async with engine.begin() as conn:
@@ -859,6 +860,44 @@ async def _procesar_progreso_scouting(db: AsyncSession, fecha: date, id_partida:
         reporte.fecha_ultimo_reporte = fecha
 
 
+PROB_MEJORA_INDIVIDUAL = 0.06
+COSTO_ENERGIA_INDIVIDUAL = 5
+
+
+async def _procesar_entrenamiento_individual(db: AsyncSession, fecha: date, id_partida: int) -> None:
+    """Se corre una vez por semana de juego (los lunes): todo jugador con un
+    `foco_individual` fijado tiene chance de mejorar algún atributo de ese
+    grupo, además de (e independiente de) lo que le toque por el plan de
+    entrenamiento grupal del equipo — ver aplicar_entrenamiento."""
+    if fecha.weekday() != 0:
+        return
+    jugadores = (await db.execute(
+        select(Jugador).where(
+            Jugador.id_partida == id_partida,
+            Jugador.foco_individual.is_not(None),
+            Jugador.categoria == "PRIMERA",
+            Jugador.edad < 29,
+            Jugador.id_equipo.is_not(None),
+        )
+    )).scalars().all()
+    if not jugadores:
+        return
+    bonos_red = await _bonos_red_por_equipos(db, id_partida, {j.id_equipo for j in jugadores})
+    for j in jugadores:
+        grupo = grupo_atributos(j.foco_individual)
+        if not grupo:
+            continue
+        prob = PROB_MEJORA_INDIVIDUAL + _bono_centro(bonos_red.get(j.id_equipo))
+        cambio = False
+        for atributo in grupo:
+            if random.random() < prob and getattr(j, atributo) < j.potencial:
+                setattr(j, atributo, min(j.potencial, getattr(j, atributo) + 1))
+                cambio = True
+        if cambio:
+            recalcular_derivados_jugador(j)
+        j.energia = max(0, j.energia - COSTO_ENERGIA_INDIVIDUAL)
+
+
 CONFEDERACIONES = ["UEFA", "CONMEBOL"]
 
 
@@ -1303,6 +1342,7 @@ async def avanzar_dia(id_partida: int, db: AsyncSession = Depends(get_db)):
     await _procesar_contratos(db, estado.fecha_actual, id_partida)
     await _procesar_cesiones(db, estado.fecha_actual, id_partida)
     await _procesar_progreso_scouting(db, estado.fecha_actual, id_partida)
+    await _procesar_entrenamiento_individual(db, estado.fecha_actual, id_partida)
     await _procesar_solicitudes_participacion(db, estado.fecha_actual, id_partida)
     await _procesar_arranques_diferidos(db, estado.fecha_actual, id_partida)
     await _procesar_partidos_ajenos_del_dia(db, estado.fecha_actual, id_partida, equipo_usuario)
@@ -1362,6 +1402,7 @@ async def simular_hasta(id_partida: int, datos: dict, db: AsyncSession = Depends
         await _procesar_contratos(db, estado.fecha_actual, id_partida)
         await _procesar_cesiones(db, estado.fecha_actual, id_partida)
         await _procesar_progreso_scouting(db, estado.fecha_actual, id_partida)
+        await _procesar_entrenamiento_individual(db, estado.fecha_actual, id_partida)
         await _procesar_solicitudes_participacion(db, estado.fecha_actual, id_partida)
         await _procesar_arranques_diferidos(db, estado.fecha_actual, id_partida)
         await _procesar_partidos_ajenos_del_dia(db, estado.fecha_actual, id_partida, equipo_usuario)
@@ -2222,6 +2263,32 @@ async def configurar_entrenamiento(datos: EntrenamientoIn, db: AsyncSession = De
 
     await db.commit()
     return {"status": "ok", "mensaje": f"Entrenamiento configurado en modo {datos.foco}/{datos.intensidad}"}
+
+
+FOCOS_INDIVIDUALES_VALIDOS = {"OFENSIVO", "DEFENSIVO", "PASE", "FISICO"}
+
+
+@app.post("/entrenamiento/individual", tags=["Entrenamiento"])
+async def configurar_entrenamiento_individual(datos: EntrenamientoIndividualIn, db: AsyncSession = Depends(get_db)):
+    """Foco extra propio de UN jugador, además del plan grupal de su equipo
+    — progresa solo cada semana, ver _procesar_entrenamiento_individual."""
+    if datos.foco is not None and datos.foco not in FOCOS_INDIVIDUALES_VALIDOS:
+        raise HTTPException(status_code=400, detail=f"Foco inválido, debe ser uno de {sorted(FOCOS_INDIVIDUALES_VALIDOS)} o null.")
+    jugador = await db.get(Jugador, datos.id_jugador)
+    if not jugador:
+        raise HTTPException(status_code=404, detail="Jugador no encontrado")
+    jugador.foco_individual = datos.foco
+
+    if jugador.id_equipo:
+        fecha = await _fecha_actual(db, jugador.id_partida)
+        mensaje = (
+            f"Se asignó a {jugador.nombre} un foco de entrenamiento individual en {datos.foco}."
+            if datos.foco else f"Se quitó el foco de entrenamiento individual de {jugador.nombre}."
+        )
+        await _crear_mensaje(db, jugador.id_equipo, "Cuerpo Técnico", "Entrenamiento individual actualizado", mensaje, "ENTRENAMIENTO", fecha)
+
+    await db.commit()
+    return {"status": "ok", "foco_individual": jugador.foco_individual}
 
 
 # ---------- MERCADO: LISTAR JUGADORES DISPONIBLES (de otros equipos, todas las ligas, + libres) ----------

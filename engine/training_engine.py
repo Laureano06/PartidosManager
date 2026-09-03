@@ -15,6 +15,29 @@ _GRUPOS_FOCO = {
 }
 
 
+def grupo_atributos(foco: str) -> list[str] | None:
+    """Atributos que entrena cada foco — expuesto para el entrenamiento
+    individual (main.py), que reutiliza la misma taxonomía de grupos."""
+    return _GRUPOS_FOCO.get(foco)
+
+
+def recalcular_derivados_jugador(j) -> None:
+    """Recompone ataque/defensa/pase/fisico de un Jugador ORM desde sus
+    componentes — compartido entre el entrenamiento grupal y el individual
+    para no duplicar la lista de 19 atributos en los dos lados."""
+    derivados = recalcular_derivados({
+        "finalizacion": j.finalizacion, "regate": j.regate, "tiros_lejanos": j.tiros_lejanos,
+        "centros": j.centros, "marcaje": j.marcaje, "entradas": j.entradas, "cabeceo": j.cabeceo,
+        "valentia": j.valentia, "pase": j.pase, "vision": j.vision, "primer_toque": j.primer_toque,
+        "decisiones": j.decisiones, "ritmo": j.ritmo, "aceleracion": j.aceleracion,
+        "resistencia": j.resistencia, "fuerza": j.fuerza, "agilidad": j.agilidad,
+        "porteria": j.porteria, "anticipacion": j.anticipacion,
+    }, j.posicion)
+    j.ataque, j.defensa, j.pase, j.fisico = (
+        derivados["ataque"], derivados["defensa"], derivados["pase"], derivados["fisico"],
+    )
+
+
 def aplicar_entrenamiento(jugadores: list, foco: str, intensidad: str, bono_centro: float = 0.0) -> None:
     """Modifica in-place los objetos ORM Jugador según el plan de entrenamiento.
 
@@ -40,14 +63,4 @@ def aplicar_entrenamiento(jugadores: list, foco: str, intensidad: str, bono_cent
                     setattr(j, atributo, min(j.potencial, getattr(j, atributo) + 1))
                     cambio = True
             if cambio:
-                derivados = recalcular_derivados({
-                    "finalizacion": j.finalizacion, "regate": j.regate, "tiros_lejanos": j.tiros_lejanos,
-                    "centros": j.centros, "marcaje": j.marcaje, "entradas": j.entradas, "cabeceo": j.cabeceo,
-                    "valentia": j.valentia, "pase": j.pase, "vision": j.vision, "primer_toque": j.primer_toque,
-                    "decisiones": j.decisiones, "ritmo": j.ritmo, "aceleracion": j.aceleracion,
-                    "resistencia": j.resistencia, "fuerza": j.fuerza, "agilidad": j.agilidad,
-                    "porteria": j.porteria, "anticipacion": j.anticipacion,
-                }, j.posicion)
-                j.ataque, j.defensa, j.pase, j.fisico = (
-                    derivados["ataque"], derivados["defensa"], derivados["pase"], derivados["fisico"],
-                )
+                recalcular_derivados_jugador(j)
