@@ -11,8 +11,8 @@ import TacticasPage from './pages/TacticasPage';
 import TransferenciasPage from './pages/TransferenciasPage';
 import DirectivaPage from './pages/DirectivaPage';
 import DecisionDTPage from './pages/DecisionDTPage';
-import DbSelectorPage from './pages/DbSelectorPage';
-import RoadmapPage from './pages/RoadmapPage';
+import InicioPage from './pages/InicioPage';
+import EditorPage from './pages/EditorPage';
 import CrearCarreraPage from './pages/CrearCarreraPage';
 import DesarrolloPage from './pages/DesarrolloPage';
 import AcademiaPage from './pages/AcademiaPage';
@@ -34,7 +34,7 @@ const INICIO_TEMPORADA = new Date(2027, 1, 1); // debe coincidir con seed.py: IN
 function GameLayout({
   fechaActualDate, diaNumero, avanzarDia, esDiaDePartido, presupuesto, nombreClubUsuario, escudoClubUsuario, confianzaDirectiva,
   plantilla, setPlantilla, idEquipoUsuario, idPartida, fechaActualISO, onPartidoJugado, refrescarEquipo, cargarPlantilla,
-  simularHasta, resultadoSimulacion, cambiarDeCarrera, volverAlInicio, onEstadoCambiado, clubActivo, setClubActivo,
+  simularHasta, resultadoSimulacion, volverAlInicio, onEstadoCambiado, clubActivo, setClubActivo,
   plantillaClubActivo, setPlantillaClubActivo, refrescarPlantillasRelevantes,
 }) {
   // Las pantallas de GESTIÓN de un club (táctica, cuerpo técnico, mercado,
@@ -68,7 +68,6 @@ function GameLayout({
           nombreClub={nombreClubUsuario}
           escudoUrl={escudoClubUsuario}
           confianzaDirectiva={confianzaDirectiva}
-          cambiarDeCarrera={cambiarDeCarrera}
           volverAlInicio={volverAlInicio}
           API_URL={API_URL}
           idEquipoUsuario={idEquipoUsuario}
@@ -105,12 +104,15 @@ function GameLayout({
 }
 
 export default function App() {
-  const [dataset, setDataset] = useState(() => localStorage.getItem('dataset_seleccionado') || null);
+  // `dataset` (ficticia | personalizada) ya no es un paso previo persistente:
+  // solo importa mientras `vista === 'crear'`, se elige en InicioPage y se
+  // descarta al volver — ver InicioPage.jsx.
+  const [dataset, setDataset] = useState(null);
   const [idPartida, setIdPartida] = useState(() => {
     const guardado = localStorage.getItem('id_partida');
     return guardado ? Number(guardado) : null;
   });
-  const [vista, setVista] = useState('roadmap'); // 'roadmap' | 'crear' -- solo importa cuando hay dataset pero no partida
+  const [vista, setVista] = useState('inicio'); // 'inicio' | 'crear' | 'editor' -- solo importa cuando no hay partida activa
 
   const [directiva, setDirectiva] = useState(null); // {estado_dt, ofertas} — null hasta el primer fetch
 
@@ -146,35 +148,22 @@ export default function App() {
     link.href = '/iconoPARTIDOS.png';
   }, []);
 
-  const seleccionarDataset = (ds) => {
-    localStorage.setItem('dataset_seleccionado', ds);
-    setDataset(ds);
-    setVista('roadmap');
-  };
-
+  // Se guarda aparte de 'id_partida' (que se borra al volver al inicio) y
+  // NUNCA se limpia — es lo que le permite a InicioPage mostrar "Última
+  // partida" incluso después de salir de una carrera, igual que el "last
+  // played" de cualquier launcher de juegos.
   const seleccionarPartida = (id) => {
     localStorage.setItem('id_partida', String(id));
+    localStorage.setItem('ultima_partida_id', String(id));
     setIdPartida(id);
   };
 
-  const cambiarDeCarrera = () => {
-    localStorage.removeItem('id_partida');
-    setIdPartida(null);
-    setIdEquipoUsuario(null);
-    setFechaActualISO(null);
-    setVista('roadmap');
-  };
-
-  // A diferencia de cambiarDeCarrera, esto también suelta el dataset
-  // elegido (ficticia/personalizada) y vuelve a la pantalla inicial del
-  // juego, no solo a la hoja de ruta de carreras.
   const volverAlInicio = () => {
     localStorage.removeItem('id_partida');
-    localStorage.removeItem('dataset_seleccionado');
     setIdPartida(null);
     setIdEquipoUsuario(null);
     setFechaActualISO(null);
-    setVista('roadmap');
+    setVista('inicio');
     setDataset(null);
   };
 
@@ -182,7 +171,7 @@ export default function App() {
   // Si la partida guardada en localStorage ya no existe (por ej. se borró desde
   // otra pestaña/sesión), el fetch vuelve vacío: sin esto, el juego se queda
   // trabado para siempre en "Cargando tu club desde el servidor..." — en vez
-  // de eso, se limpia la partida stale y se vuelve a la hoja de ruta.
+  // de eso, se limpia la partida stale y se vuelve al inicio.
   const cargarEquipoUsuario = useCallback(() => {
     if (!idPartida) return;
     fetch(`${API_URL}/equipos?id_partida=${idPartida}`)
@@ -195,7 +184,7 @@ export default function App() {
           setEscudoClubUsuario(propio.escudo_url || null);
           setPresupuesto(propio.presupuesto_fichajes);
         } else {
-          cambiarDeCarrera();
+          volverAlInicio();
         }
       })
       .catch((error) => console.error('Error obteniendo el equipo del usuario:', error));
@@ -355,12 +344,28 @@ export default function App() {
   const diaNumero = Math.max(1, Math.round((fechaActualDate - INICIO_TEMPORADA) / 86400000) + 1);
 
   let contenido;
-  if (!dataset) {
-    contenido = <DbSelectorPage onSelectDataset={seleccionarDataset} />;
-  } else if (!idPartida) {
-    contenido = vista === 'crear'
-      ? <CrearCarreraPage API_URL={API_URL} dataset={dataset} onCarreraCreada={seleccionarPartida} onVolver={() => setVista('roadmap')} />
-      : <RoadmapPage API_URL={API_URL} dataset={dataset} onContinuar={seleccionarPartida} onCrearNueva={() => setVista('crear')} onCambiarDataset={() => setDataset(null)} />;
+  if (!idPartida) {
+    if (vista === 'crear') {
+      contenido = (
+        <CrearCarreraPage
+          API_URL={API_URL}
+          dataset={dataset}
+          onCarreraCreada={seleccionarPartida}
+          onVolver={() => { setVista('inicio'); setDataset(null); }}
+        />
+      );
+    } else if (vista === 'editor') {
+      contenido = <EditorPage API_URL={API_URL} onVolver={() => setVista('inicio')} />;
+    } else {
+      contenido = (
+        <InicioPage
+          API_URL={API_URL}
+          onContinuar={seleccionarPartida}
+          onNuevaPartida={(ds) => { setDataset(ds); setVista('crear'); }}
+          onAbrirEditor={() => setVista('editor')}
+        />
+      );
+    }
   } else if (!idEquipoUsuario) {
     contenido = (
       <div className="min-h-screen bg-[#0b1326] text-slate-100 flex items-center justify-center text-sm">
@@ -400,7 +405,6 @@ export default function App() {
         cargarPlantilla={cargarPlantilla}
         simularHasta={simularHasta}
         resultadoSimulacion={resultadoSimulacion}
-        cambiarDeCarrera={cambiarDeCarrera}
         volverAlInicio={volverAlInicio}
         clubActivo={clubActivo}
         setClubActivo={setClubActivo}
