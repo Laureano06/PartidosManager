@@ -1,0 +1,97 @@
+@import "tailwindcss";
+
+/* Oculta la barra de scroll visual mientras se mantiene el desplazamiento
+   (rueda, touch o arrastre con useDragScroll). "Deslizante", sin rieles. */
+.scroll-slide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+  overscroll-behavior: contain;
+}
+.scroll-slide::-webkit-scrollbar {
+  display: none;
+}
+.scroll-slide.dragging {
+  cursor: grabbing;
+  user-select: none;
+}/* PARTIDOS: workspace de gestión, inspirado en las referencias del usuario. */
+:root { --fm-bg:#171d29; --fm-panel:#222b3b; --fm-line:#374358; --fm-accent:#68afff; --fm-muted:#a7b5c8; }
+body { margin:0; background:var(--fm-bg); color:#edf2f8; font-family:Arial,Helvetica,sans-serif; }
+::selection { background:#2a6097; color:white; }
+:focus-visible { outline:2px solid #86bfff; outline-offset:3px; }
+button,select,input { accent-color:var(--fm-accent); }
+button:not(:disabled),a { touch-action:manipulation; }
+.fm-app { background:var(--fm-bg); font-size:13px; }
+.fm-main { padding:16px; }
+.fm-app aside { width:210px; background:#191d2b; padding:12px; }
+.fm-app .rounded-2xl,.fm-workspace .rounded-2xl { border-radius:5px; }
+.fm-app .rounded-xl,.fm-workspace .rounded-xl { border-radius:4px; }
+.fm-app table { font-variant-numeric:tabular-nums; }
+.fm-app th { color:#a9b9ce; font-size:11px; font-weight:600; text-align:left; }
+.fm-app td { border-bottom:1px solid #303849; }
+.fm-app tbody tr:nth-child(even) { background:#ffffff03; }
+.fm-app tbody tr:hover { background:#49779a20; }
+.fm-app .scroll-slide,.fm-workspace.scroll-slide { scrollbar-width:thin; scrollbar-color:#516077 transparent; }
+.fm-app .scroll-slide::-webkit-scrollbar,.fm-workspace::-webkit-scrollbar { display:block; width:6px; height:6px; }
+.fm-workspace-overlay { padding:0; }
+.fm-workspace { border:0; background:var(--fm-bg); border-radius:0; }
+.fm-workspace > [class*="max-w-"] { max-width:none; min-height:100%; padding:28px; }
+.fm-player-screen { min-height:100%; display:flex; flex-direction:column; }
+.fm-section-tabs { display:flex; gap:8px; align-items:center; min-height:54px; padding:0 22px; background:#1b2331; border-bottom:1px solid var(--fm-line); position:sticky; top:0; z-index:3; overflow-x:auto; flex-shrink:0; }
+.fm-section-tabs button { padding:16px 18px; white-space:nowrap; border-bottom:3px solid transparent; color:#bac7d9; }
+.fm-section-tabs button[aria-current] { color:white; border-color:#65aafa; background:#243449; }
+.fm-player-identity { display:flex; align-items:center; gap:28px; min-height:175px; padding:20px 28px 0; background:linear-gradient(110deg,#163a70,#1a2333 68%); border-bottom:1px solid var(--fm-line); }
+.fm-player-identity > :last-child { margin-left:auto; padding-bottom:20px; }
+.player-face { display:inline-flex; align-items:flex-end; justify-content:center; flex-shrink:0; overflow:hidden; }
+.player-face img { width:100%; height:100%; object-fit:contain; object-position:bottom; }
+.player-face svg { width:85%; height:100%; fill:#8294ad; }
+.fm-profile-face { width:138px; height:150px; }
+.editor-face { width:80px; height:92px; background:#1b2639; }
+.fm-list-face { width:32px; height:38px; }
+.fm-player-overview { padding:22px 28px; display:grid; grid-template-columns:230px minmax(0,1fr); gap:22px; }
+.fm-attribute-columns { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:14px; }
+.fm-attribute-columns > div { background:var(--fm-panel); padding:14px 16px; }
+.fm-contract-overview { padding:28px; display:grid; grid-template-columns:1fr 1fr; gap:24px; }
+.fm-panel { background:var(--fm-panel); border:1px solid var(--fm-line); padding:20px; }
+.fm-panel h4 { font-size:14px; font-weight:700; margin-bottom:14px; }
+.fm-history { padding:24px; }
+.fm-player-actions { padding:18px 28px; margin-top:auto; background:#1a2230; border-top:1px solid var(--fm-line); }
+.fm-tactics { display:flex; flex-wrap:wrap; align-items:stretch; gap:14px; min-height:100%; }
+.fm-tactics-controls { flex:0 0 210px; }
+.fm-tactics-field { flex:1 1 400px; }
+.fm-tactics-roster { flex:0 1 clamp(260px,24vw,390px); display:flex; }
+.fm-tactics-reserves { flex:1 0 100%; }
+.fm-tactics-controls { background:#13382e; padding:18px; border:1px solid #2b6050; min-height:600px; }
+.fm-tactics-controls label { color:#bed2ca; }
+.fm-tactics-field { min-width:0; display:flex; flex-direction:column; gap:14px; }
+.fm-pitch { position:relative; flex:1 1 auto; width:100%; min-height:clamp(600px,76vh,850px); overflow:hidden; background:repeating-linear-gradient(0deg,#137143 0%,#137143 10%,#157848 10%,#157848 20%); border:1px solid #3a956b; }
+.fm-pitch::before,.fm-pitch::after { content:""; position:absolute; left:30%; width:40%; height:15%; border:1px solid #c2e2c080; pointer-events:none; }
+.fm-pitch::before { top:12px; border-top:0; }
+.fm-pitch::after { bottom:12px; border-bottom:0; }
+.fm-pitch > .absolute:first-child { border-color:#c2e2c070; border-width:1px; }
+.fm-pitch-face { width:44px; height:50px; }
+.fm-pitch-name { border:0; border-radius:2px; background:#0b382b; min-width:76px; text-align:center; font-size:9px; max-width:96px; overflow:hidden; text-overflow:ellipsis; }
+.fm-pitch button { min-width:18px; min-height:18px; font-size:8px; }
+.fm-tactics-roster > div { flex:1; padding:14px; background:var(--fm-panel); }
+.fm-tactics-roster [draggable] { justify-content:flex-start; text-align:left; }
+.fm-tactics-reserves { grid-column:1 / -1; min-width:0; }
+.fm-tactics-reserves > div { min-height:170px; background:var(--fm-panel); border:1px solid var(--fm-line); border-radius:12px; padding:16px; }
+.fm-tactics-reserves [draggable] { min-height:66px; }
+.fm-negotiation,.fm-conversation { display:grid; grid-template-columns:minmax(300px,1fr) minmax(280px,.7fr); align-content:start; gap:24px; }
+.fm-negotiation > :first-child,.fm-conversation > :first-child { grid-column:1 / -1; border-bottom:1px solid var(--fm-line); padding-bottom:18px; }
+.fm-negotiation-log { grid-column:2; grid-row:2 / span 8; background:#202b3b; padding:22px; border:1px solid var(--fm-line); }
+.fm-negotiation-log h4 { font-size:16px; font-weight:700; margin-bottom:20px; }
+.fm-negotiation-log li { padding:14px 0; border-bottom:1px solid var(--fm-line); }
+.fm-conversation-history { grid-column:1; min-height:300px; }
+.fm-conversation-options { grid-column:2; grid-row:2; display:flex; flex-direction:column; align-items:stretch; }
+.fm-conversation-options button { text-align:left; min-height:44px; }
+[hidden] { display:none !important; }
+@media(min-width:1450px) { .fm-tactics-controls { flex-basis:230px; } .fm-tactics-roster { flex-basis:clamp(350px,25vw,440px); } }
+@media(max-width:1150px) { .fm-tactics-controls { flex-basis:190px; } .fm-tactics-roster { flex:1 0 100%; } .fm-tactics-roster > div > div { display:grid; grid-template-columns:repeat(3,1fr); } .fm-attribute-columns { grid-template-columns:repeat(2,minmax(0,1fr)); } }
+@media(max-width:700px) { .fm-main { padding:54px 10px 14px; } .fm-tactics-controls,.fm-tactics-field,.fm-tactics-roster,.fm-tactics-reserves { flex:1 0 100%; } .fm-tactics-controls { min-height:0; } .fm-pitch { height:620px; } .fm-pitch-face { width:40px; height:46px; } .fm-pitch-name { min-width:60px; max-width:76px; font-size:9px; } .fm-player-overview,.fm-contract-overview { grid-template-columns:1fr; padding:16px; } .fm-player-identity { padding:16px; gap:14px; flex-wrap:wrap; } .fm-profile-face { width:80px; height:100px; } .fm-player-identity h3 { font-size:22px; } .fm-section-tabs { padding:0 8px; } .fm-section-tabs button { padding:14px 10px; } .fm-negotiation,.fm-conversation { display:flex; flex-direction:column; padding:16px!important; } .fm-attribute-columns { grid-template-columns:1fr; } .fm-player-actions { padding:16px; } }
+@media(prefers-reduced-motion:reduce) { *,*::before,*::after { scroll-behavior:auto!important; transition-duration:0.01ms!important; animation-duration:0.01ms!important; } }
+@media(max-width:700px) {
+  .fm-player-identity { display:grid; grid-template-columns:80px minmax(0,1fr); gap:12px; }
+  .fm-player-identity > .fm-profile-face { grid-row:1 / span 2; align-self:start; }
+  .fm-player-identity > :last-child { grid-column:2; margin:0; padding:0; flex-direction:row; align-items:center; gap:10px; }
+  .fm-player-identity > :last-child > span:first-child { font-size:18px; padding:4px 12px; }
+}

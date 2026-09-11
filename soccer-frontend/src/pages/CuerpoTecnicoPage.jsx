@@ -1,0 +1,316 @@
+import React, { useCallback, useEffect, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
+import Modal from '../components/Modal';
+
+function BarraProgreso({ progreso }) {
+  return (
+    <div className="w-full bg-[#0b1326] h-2 rounded-full overflow-hidden border border-slate-800">
+      <div className="bg-sky-400 h-full" style={{ width: `${progreso}%` }} />
+    </div>
+  );
+}
+
+function RangoOverall({ objetivo }) {
+  if (objetivo.overall != null) return <span className="font-bold text-white">{objetivo.overall}</span>;
+  return <span className="font-bold text-slate-400">{objetivo.overall_rango[0]}-{objetivo.overall_rango[1]}</span>;
+}
+
+const FOCO_LABEL = { EQUILIBRADO: 'Equilibrado', OFENSIVO: 'Ofensivo', DEFENSIVO: 'Defensivo', PASE: 'Pase', FISICO: 'Físico', DESCANSO: 'Descanso' };
+const INTENSIDAD_LABEL = { BAJA: 'Baja', MEDIA: 'Media', ALTA: 'Alta' };
+
+export default function CuerpoTecnicoPage({ API_URL, idEquipoUsuario }) {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [datos, setDatos] = useState(null);
+  const [cargando, setCargando] = useState(true);
+  const [ojeadorAsignando, setOjeadorAsignando] = useState(null);
+  const [nombreBusqueda, setNombreBusqueda] = useState('');
+  const [resultados, setResultados] = useState([]);
+  const [foco, setFoco] = useState('EQUILIBRADO');
+  const [intensidad, setIntensidad] = useState('MEDIA');
+  const [guardandoEntrenamiento, setGuardandoEntrenamiento] = useState(false);
+  const [error, setError] = useState(null);
+  const [capitanSeleccionado, setCapitanSeleccionado] = useState('');
+  const [guardandoCapitan, setGuardandoCapitan] = useState(false);
+
+  const idJugadorPreseleccionado = searchParams.get('asignar');
+
+  const cargar = useCallback(() => {
+    if (!idEquipoUsuario) return;
+    setCargando(true);
+    fetch(`${API_URL}/equipos/${idEquipoUsuario}/cuerpo-tecnico`)
+      .then((r) => r.json())
+      .then((data) => {
+        setDatos(data);
+        setFoco(data.entrenamiento.foco);
+        setIntensidad(data.entrenamiento.intensidad);
+        setCapitanSeleccionado(data.vestuario?.capitan?.id_jugador ? String(data.vestuario.capitan.id_jugador) : '');
+      })
+      .catch((e) => console.error('Error cargando cuerpo técnico:', e))
+      .finally(() => setCargando(false));
+  }, [API_URL, idEquipoUsuario]);
+
+  useEffect(() => { cargar(); }, [cargar]);
+
+  const guardarEntrenamiento = async () => {
+    setGuardandoEntrenamiento(true);
+    try {
+      await fetch(`${API_URL}/entrenamiento/configurar`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id_equipo: idEquipoUsuario, foco, intensidad }),
+      });
+      cargar();
+    } catch (e) {
+      console.error('Error configurando entrenamiento:', e);
+    } finally {
+      setGuardandoEntrenamiento(false);
+    }
+  };
+
+  const guardarCapitan = async () => {
+    setGuardandoCapitan(true);
+    try {
+      await fetch(`${API_URL}/equipos/${idEquipoUsuario}/capitan`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id_jugador: capitanSeleccionado ? Number(capitanSeleccionado) : null }),
+      });
+      cargar();
+    } catch (e) {
+      console.error('Error asignando capitán:', e);
+    } finally {
+      setGuardandoCapitan(false);
+    }
+  };
+
+  // Si venimos de "Enviar ojeador" en otra pantalla con un jugador ya
+  // elegido, se asigna directo al primer ojeador libre en vez de pedirle
+  // al usuario que vuelva a elegir el objetivo.
+  useEffect(() => {
+    if (!idJugadorPreseleccionado || !datos) return;
+    const libre = datos.ojeadores.find((o) => !o.asignado);
+    if (libre) {
+      asignar(libre.id_ojeador, Number(idJugadorPreseleccionado));
+    }
+    setSearchParams({}, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [idJugadorPreseleccionado, datos]);
+
+  const asignar = async (idOjeador, idJugador) => {
+    try {
+      const r = await fetch(`${API_URL}/scouting/asignar`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id_ojeador: idOjeador, id_jugador: idJugador }),
+      });
+      if (!r.ok) throw new Error('respuesta no ok');
+      setOjeadorAsignando(null);
+      setNombreBusqueda('');
+      setResultados([]);
+      setError(null);
+      cargar();
+    } catch (e) {
+      console.error('Error asignando ojeador:', e);
+      setError('No se pudo asignar el objetivo. Probá de nuevo.');
+    }
+  };
+
+  const quitar = async (idOjeador) => {
+    try {
+      const r = await fetch(`${API_URL}/scouting/quitar`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id_ojeador: idOjeador }),
+      });
+      if (!r.ok) throw new Error('respuesta no ok');
+      setError(null);
+      cargar();
+    } catch (e) {
+      console.error('Error quitando asignación:', e);
+      setError('No se pudo quitar la asignación. Probá de nuevo.');
+    }
+  };
+
+  const buscar = (texto) => {
+    setNombreBusqueda(texto);
+    if (!texto.trim()) { setResultados([]); return; }
+    const params = new URLSearchParams({ id_equipo: String(idEquipoUsuario), nombre: texto, orden: 'valor' });
+    fetch(`${API_URL}/mercado/jugadores?${params.toString()}`)
+      .then((r) => r.json())
+      .then((data) => setResultados(data.jugadores.slice(0, 8)))
+      .catch((e) => console.error('Error buscando jugador para scoutear:', e));
+  };
+
+  if (cargando || !datos) {
+    return <p className="text-xs text-slate-400">Cargando cuerpo técnico...</p>;
+  }
+
+  return (
+    <div className="space-y-6">
+      {error && (
+        <div className="bg-rose-950/60 border border-rose-500/40 text-rose-300 rounded-xl p-3 text-xs flex items-center justify-between gap-3">
+          <span>{error}</span>
+          <button onClick={() => setError(null)} className="text-rose-300 hover:text-rose-100 font-bold shrink-0">✕</button>
+        </div>
+      )}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div className="bg-[#121e36] border border-slate-800 rounded-2xl p-6 space-y-2">
+          <h2 className="text-xs font-bold text-sky-400 uppercase tracking-wider">Asistente Táctico</h2>
+          <p className="text-lg font-black text-white">{datos.asistente.nombre}</p>
+          <p className="text-sm text-slate-300 leading-relaxed">"{datos.asistente.opinion}"</p>
+        </div>
+
+        <div className="bg-[#121e36] border border-slate-800 rounded-2xl p-6 space-y-3">
+          <h2 className="text-xs font-bold text-sky-400 uppercase tracking-wider">Asistente de Entrenamiento</h2>
+          <p className="text-sm text-slate-300 leading-relaxed">"{datos.entrenamiento.consejo}"</p>
+          <div className="flex gap-3">
+            <div className="flex-1">
+              <label htmlFor="entrenamiento-foco" className="text-xs text-slate-400 block mb-1">Foco</label>
+              <select
+                id="entrenamiento-foco"
+                value={foco}
+                onChange={(e) => setFoco(e.target.value)}
+                className="w-full bg-[#0b1326] border border-slate-700 p-2 rounded-lg text-white text-xs"
+              >
+                {Object.entries(FOCO_LABEL).map(([valor, label]) => (
+                  <option key={valor} value={valor}>{label}</option>
+                ))}
+              </select>
+            </div>
+            <div className="flex-1">
+              <label htmlFor="entrenamiento-intensidad" className="text-xs text-slate-400 block mb-1">Intensidad</label>
+              <select
+                id="entrenamiento-intensidad"
+                value={intensidad}
+                onChange={(e) => setIntensidad(e.target.value)}
+                className="w-full bg-[#0b1326] border border-slate-700 p-2 rounded-lg text-white text-xs"
+              >
+                {Object.entries(INTENSIDAD_LABEL).map(([valor, label]) => (
+                  <option key={valor} value={valor}>{label}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+          <button
+            onClick={guardarEntrenamiento}
+            disabled={guardandoEntrenamiento}
+            className="w-full bg-sky-500 hover:bg-sky-400 disabled:opacity-50 text-slate-950 font-bold px-4 py-2 rounded-lg text-xs"
+          >
+            {guardandoEntrenamiento ? 'Aplicando...' : 'Aplicar plan de entrenamiento'}
+          </button>
+        </div>
+      </div>
+
+      {datos.vestuario && (
+        <div className="bg-[#121e36] border border-slate-800 rounded-2xl p-6 space-y-3">
+          <h2 className="text-xs font-bold text-sky-400 uppercase tracking-wider">Vestuario</h2>
+          <div className="flex items-center gap-3">
+            <div className="flex-1">
+              <BarraProgreso progreso={datos.vestuario.puntaje} />
+            </div>
+            <span className="text-sm font-bold text-white shrink-0">{datos.vestuario.puntaje}</span>
+          </div>
+          <p className="text-sm text-slate-300 leading-relaxed">{datos.vestuario.consejo}</p>
+          <div>
+            <p className="text-[11px] font-bold text-violet-300 mb-2">Jugadores a acompañar</p>
+            <div className="flex flex-wrap gap-2">{datos.vestuario.jugadores_a_acompanar.map((j) => <span key={j.id_jugador} className="rounded-lg border border-violet-500/20 bg-violet-950/20 px-2 py-1 text-[11px] text-violet-100">{j.nombre} · moral {j.moral} · vínculo {j.relacion_dt}</span>)}</div>
+          </div>
+          <div className="flex gap-3 items-end">
+            <div className="flex-1">
+              <label htmlFor="vestuario-capitan" className="text-xs text-slate-400 block mb-1">Capitán</label>
+              <select
+                id="vestuario-capitan"
+                value={capitanSeleccionado}
+                onChange={(e) => setCapitanSeleccionado(e.target.value)}
+                className="w-full bg-[#0b1326] border border-slate-700 p-2 rounded-lg text-white text-xs"
+              >
+                <option value="">Sin capitán</option>
+                {datos.vestuario.plantel_primera.map((j) => (
+                  <option key={j.id_jugador} value={j.id_jugador}>{j.nombre} ({j.posicion})</option>
+                ))}
+              </select>
+            </div>
+            <button
+              onClick={guardarCapitan}
+              disabled={guardandoCapitan}
+              className="bg-sky-500 hover:bg-sky-400 disabled:opacity-50 text-slate-950 font-bold px-4 py-2 rounded-lg text-xs shrink-0"
+            >
+              {guardandoCapitan ? 'Guardando...' : 'Guardar'}
+            </button>
+          </div>
+        </div>
+      )}
+
+      <div className="bg-[#121e36] border border-slate-800 rounded-2xl p-6">
+        <h2 className="text-sm font-bold text-white mb-1">Ojeadores</h2>
+        <p className="text-[11px] text-slate-400 mb-4">Cada ojeador scoutea a un jugador a la vez — cuanto mejor su calidad, más rápido cierra el rango de overall/potencial hasta revelar el número exacto.</p>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          {datos.ojeadores.map((o) => (
+            <div key={o.id_ojeador} className="bg-[#0b1326] border border-slate-800 rounded-xl p-4 space-y-2">
+              <div className="flex items-center justify-between">
+                <p className="font-bold text-slate-200 text-sm">{o.nombre}</p>
+                <span className="text-[10px] text-slate-400">Calidad {o.calidad}</span>
+              </div>
+              {o.asignado ? (
+                <>
+                  <p className="text-xs text-slate-400">
+                    Scouteando a <span className="text-slate-200 font-bold">{o.asignado.nombre}</span> ({o.asignado.posicion_especifica || o.asignado.posicion})
+                  </p>
+                  <BarraProgreso progreso={o.asignado.progreso} />
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="text-slate-400">{o.asignado.progreso}% investigado</span>
+                    <span>Ovr <RangoOverall objetivo={o.asignado} /></span>
+                  </div>
+                  <button
+                    onClick={() => quitar(o.id_ojeador)}
+                    className="w-full mt-1 text-[11px] text-slate-400 hover:text-slate-300"
+                  >
+                    Quitar del objetivo
+                  </button>
+                </>
+              ) : (
+                <button
+                  onClick={() => setOjeadorAsignando(o.id_ojeador)}
+                  className="w-full bg-sky-500 hover:bg-sky-400 text-slate-950 font-bold px-3 py-2 rounded-lg text-xs"
+                >
+                  Asignar objetivo
+                </button>
+              )}
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <Modal open={ojeadorAsignando != null} onClose={() => setOjeadorAsignando(null)} size="sm" labelledBy="asignar-ojeador-title">
+        <div className="p-6 space-y-4">
+          <h3 id="asignar-ojeador-title" className="text-sm font-bold text-white">¿A quién scoutea?</h3>
+          <input
+            type="text"
+            value={nombreBusqueda}
+            onChange={(e) => buscar(e.target.value)}
+            placeholder="Buscar jugador por nombre..."
+            className="w-full bg-[#0b1326] border border-slate-700 p-2.5 rounded-lg text-white text-sm"
+          />
+          <div className="space-y-1.5 max-h-72 overflow-y-auto scroll-slide">
+            {resultados.map((j) => (
+              <button
+                key={j.id_jugador}
+                onClick={() => asignar(ojeadorAsignando, j.id_jugador)}
+                className="w-full text-left flex items-center justify-between bg-[#0b1326] border border-slate-800 hover:border-sky-500/50 rounded-lg px-3 py-2 text-xs transition"
+              >
+                <span className="text-slate-200">{j.nombre} <span className="text-slate-400">({j.posicion_especifica || j.posicion})</span></span>
+                <span className="text-slate-400">{j.club}</span>
+              </button>
+            ))}
+            {nombreBusqueda && resultados.length === 0 && (
+              <p className="text-xs text-slate-400">Sin resultados.</p>
+            )}
+          </div>
+          <button onClick={() => setOjeadorAsignando(null)} className="w-full bg-slate-800 hover:bg-slate-700 text-slate-300 px-4 py-2 rounded-lg text-xs">
+            Cancelar
+          </button>
+        </div>
+      </Modal>
+    </div>
+  );
+}

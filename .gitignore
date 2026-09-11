@@ -1,0 +1,22 @@
+.env
+venv/
+.venv/
+node_modules/
+__pycache__/
+*.pyc
+soccer.db
+soccer_test.db
+*.db
+soccer-frontend/dist/
+.claude/
+.impeccable/
+.test-deps/
+*.log
+
+# Fixture de prueba PERSONAL con nombres reales (ver fixtures_prueba/README.md) —
+# no se distribuye con el juego a propósito, queda solo en tu máquina.
+fixtures_prueba/
+
+# Escudos que subís vos mismo desde el Editor (POST /escudos/subir) — contenido
+# de runtime propio de tu máquina, no del repo.
+static/
