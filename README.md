@@ -1,5 +1,15 @@
 # Partidos Soccer Manager
 
+![Tactics screen with the formation on the pitch](docs/screenshots/tactics.png)
+
+| Squad · Plantel | Standings · Tabla |
+|---|---|
+| ![Squad](docs/screenshots/squad.png) | ![Standings](docs/screenshots/standings.png) |
+| **Transfer room · Sala de fichajes** | **Development center · Centro de desarrollo** |
+| ![Transfer room](docs/screenshots/transfers.png) | ![Development center](docs/screenshots/development.png) |
+
+<sub>Screenshots use the fictional data pack · Las capturas usan la base ficticia</sub>
+
 [English](#english) · [Español](#español)
 
 ---
@@ -19,7 +29,7 @@ A football management simulation for the web, in the style of Football Manager: 
 - **3D pitch view** built with Three.js
 - **Data packs:** load league and player data from external packs, with validated formats and ratings
 
-All generated data is fictional: player names, clubs and attributes are created by the game's own generator, never copied from licensed databases.
+The default data pack is fully fictional: player names, clubs and attributes are created by the game's own generator, never copied from licensed databases. Other data packs can be loaded and edited with the in-game editor.
 
 ### Tech
 
@@ -93,7 +103,7 @@ Simulador de gestión de fútbol para la web, al estilo de Football Manager: dir
 - **Vista 3D de la cancha** hecha con Three.js
 - **Data packs:** carga de datos de ligas y jugadores desde packs externos, con formatos y valoraciones validados
 
-Todos los datos generados son ficticios: los nombres de jugadores, los clubes y los atributos los crea el generador del propio juego, nunca se copian de bases de datos con licencia.
+La base de datos por defecto es completamente ficticia: los nombres de jugadores, los clubes y los atributos los crea el generador del propio juego, nunca se copian de bases de datos con licencia. Se pueden cargar otros data packs y editarlos con el editor del juego.
 
 ### Tecnologías
 
