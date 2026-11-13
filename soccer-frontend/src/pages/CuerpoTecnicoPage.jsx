@@ -211,6 +211,10 @@ export default function CuerpoTecnicoPage({ API_URL, idEquipoUsuario }) {
             <span className="text-sm font-bold text-white shrink-0">{datos.vestuario.puntaje}</span>
           </div>
           <p className="text-sm text-slate-300 leading-relaxed">{datos.vestuario.consejo}</p>
+          <div>
+            <p className="text-[11px] font-bold text-violet-300 mb-2">Jugadores a acompañar</p>
+            <div className="flex flex-wrap gap-2">{datos.vestuario.jugadores_a_acompanar.map((j) => <span key={j.id_jugador} className="rounded-lg border border-violet-500/20 bg-violet-950/20 px-2 py-1 text-[11px] text-violet-100">{j.nombre} · moral {j.moral} · vínculo {j.relacion_dt}</span>)}</div>
+          </div>
           <div className="flex gap-3 items-end">
             <div className="flex-1">
               <label htmlFor="vestuario-capitan" className="text-xs text-slate-400 block mb-1">Capitán</label>

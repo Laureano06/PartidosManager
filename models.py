@@ -1,9 +1,34 @@
 from datetime import datetime, date
+import json
 
 from sqlalchemy import String, Integer, Float, Boolean, ForeignKey, DateTime, Date, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from database import Base
+
+
+# Estos módulos se ejecutan solos al avanzar la fecha. El valor se guarda por
+# carrera para que una partida pueda pausarlos sin afectar a las demás.
+AUTOMATIZACIONES_DEFAULT = {
+    "selecciones": True,
+    "relaciones": True,
+    "mercado": True,
+    "multiclub": True,
+    "academia": True,
+    "club_ciudad": True,
+    "direccion_deportiva": True,
+    "prensa_vestuario": True,
+    "documental": True,
+}
+
+
+def automatizaciones_de_partida(valor: str | None) -> dict[str, bool]:
+    """Devuelve una configuración completa incluso para carreras antiguas."""
+    try:
+        guardadas = json.loads(valor or "{}")
+    except (TypeError, json.JSONDecodeError):
+        guardadas = {}
+    return {clave: bool(guardadas.get(clave, defecto)) for clave, defecto in AUTOMATIZACIONES_DEFAULT.items()}
 
 
 class Partida(Base):
@@ -45,6 +70,19 @@ class Partida(Base):
     # o clave ausente = se usa el nombre ficticio por defecto (ver
     # engine/copa_engine.py NOMBRES_COMPETENCIA_DEFAULT).
     competencias_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    # Los sistemas de mundo se ejecutan por defecto al avanzar el calendario.
+    # JSON evita introducir una columna por cada módulo a medida que crece el juego.
+    automatizaciones_json: Mapped[str] = mapped_column(
+        Text, default=lambda: json.dumps(AUTOMATIZACIONES_DEFAULT), nullable=False
+    )
+
+    # Qué Data Pack se usó para generar esta carrera (ver pack_engine.py) —
+    # NULL si `dataset == "ficticia"` (el generador procedural no es un
+    # PaqueteClubes). Puramente informativo hoy: la carrera ya nació con una
+    # copia propia de Equipo/Jugador/Liga, cambiar o borrar el pack después
+    # no le afecta — solo sirve para mostrar "con qué base se creó".
+    id_paquete_clubes: Mapped[int | None] = mapped_column(ForeignKey("paquetes_clubes.id_paquete"), nullable=True)
 
 
 class Liga(Base):
@@ -104,6 +142,12 @@ class Mensaje(Base):
 
 
 class Equipo(Base):
+    datos_pack_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    @property
+    def datos_pack(self) -> dict:
+        return json.loads(self.datos_pack_json) if self.datos_pack_json else {}
+
     __tablename__ = "equipos"
 
     id_equipo: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -113,6 +157,9 @@ class Equipo(Base):
     color: Mapped[str] = mapped_column(String(10), default="#173C2E")
     es_usuario: Mapped[bool] = mapped_column(Boolean, default=False)
     reputacion: Mapped[int] = mapped_column(Integer, default=50)
+    # Ánimo de la hinchada en esta carrera. No sustituye la junta: expresa
+    # la reacción deportiva de la ciudad y sus socios.
+    humor_hinchada: Mapped[int] = mapped_column(Integer, default=60)
     # Capitán del plantel PRIMERA (opcional): su liderazgo atenúa el
     # castigo de vestuario cuando el ánimo del plantel está dividido —
     # ver _puntaje_vestuario en main.py.
@@ -174,6 +221,102 @@ class AfiliacionClub(Base):
     influencia_habilitada: Mapped[bool] = mapped_column(Boolean, default=False)
 
 
+class Seleccion(Base):
+    """Selección nacional importada con una partida.
+
+    El pack es la fuente de verdad: una carrera conserva su propia copia de
+    estas filas, igual que hace con clubes y jugadores.
+    """
+    __tablename__ = "selecciones"
+
+    id_seleccion: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    id_partida: Mapped[int] = mapped_column(ForeignKey("partidas.id_partida"))
+    # Los códigos del PMPack pueden incluir país y un identificador estable.
+    codigo: Mapped[str] = mapped_column(String(32), nullable=False)
+    nombre: Mapped[str] = mapped_column(String(100), nullable=False)
+    pais: Mapped[str] = mapped_column(String(60), nullable=False)
+    confederacion: Mapped[str] = mapped_column(String(15), default="")
+    categoria: Mapped[str] = mapped_column(String(12), default="MAYOR")
+    ranking: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    seleccionador: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    datos_pack_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class ElegibilidadSeleccion(Base):
+    """Derecho de un jugador a representar una selección en esta carrera."""
+    __tablename__ = "elegibilidades_seleccion"
+
+    id_elegibilidad: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    id_seleccion: Mapped[int] = mapped_column(ForeignKey("selecciones.id_seleccion"))
+    id_jugador: Mapped[int] = mapped_column(ForeignKey("jugadores.id_jugador"))
+    estado: Mapped[str] = mapped_column(String(20), default="ELEGIBLE")
+    partidos_oficiales: Mapped[int] = mapped_column(Integer, default=0)
+    datos_pack_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class ConvocatoriaSeleccion(Base):
+    """Jugador convocado o preseleccionado para una ventana internacional."""
+    __tablename__ = "convocatorias_seleccion"
+
+    id_convocatoria: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    id_seleccion: Mapped[int] = mapped_column(ForeignKey("selecciones.id_seleccion"))
+    id_jugador: Mapped[int] = mapped_column(ForeignKey("jugadores.id_jugador"))
+    fecha_inicio: Mapped[date | None] = mapped_column(Date, nullable=True)
+    fecha_fin: Mapped[date | None] = mapped_column(Date, nullable=True)
+    estado: Mapped[str] = mapped_column(String(20), default="CONVOCADO")
+
+
+class VentanaInternacional(Base):
+    """Período de liberación de jugadores para selecciones en una carrera."""
+    __tablename__ = "ventanas_internacionales"
+
+    id_ventana: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    id_partida: Mapped[int] = mapped_column(ForeignKey("partidas.id_partida"))
+    nombre: Mapped[str] = mapped_column(String(100), nullable=False)
+    fecha_inicio: Mapped[date] = mapped_column(Date, nullable=False)
+    fecha_fin: Mapped[date] = mapped_column(Date, nullable=False)
+    tipo: Mapped[str] = mapped_column(String(20), default="FECHA_FIFA")
+    codigos_selecciones_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class PartidoSeleccion(Base):
+    """Fixture internacional de una ventana o torneo de selecciones."""
+    __tablename__ = "partidos_selecciones"
+
+    id_partido_seleccion: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    id_partida: Mapped[int] = mapped_column(ForeignKey("partidas.id_partida"))
+    id_torneo: Mapped[int | None] = mapped_column(ForeignKey("torneos_selecciones.id_torneo"), nullable=True)
+    id_ventana: Mapped[int | None] = mapped_column(ForeignKey("ventanas_internacionales.id_ventana"), nullable=True)
+    id_local: Mapped[int] = mapped_column(ForeignKey("selecciones.id_seleccion"))
+    id_visitante: Mapped[int] = mapped_column(ForeignKey("selecciones.id_seleccion"))
+    fecha: Mapped[date] = mapped_column(Date, nullable=False)
+    tipo: Mapped[str] = mapped_column(String(30), default="AMISTOSO")
+    competencia: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    grupo: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    jornada: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    oficial: Mapped[bool] = mapped_column(Boolean, default=False)
+    jugado: Mapped[bool] = mapped_column(Boolean, default=False)
+    goles_local: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    goles_visitante: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+
+class TorneoSeleccion(Base):
+    """Competición internacional definida por el Data Pack de una carrera.
+
+    Sus grupos y calendario se conservan como JSON para aceptar reglamentos
+    distintos sin convertir reglas externas en datos inventados por el juego.
+    """
+    __tablename__ = "torneos_selecciones"
+
+    id_torneo: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    id_partida: Mapped[int] = mapped_column(ForeignKey("partidas.id_partida"))
+    codigo: Mapped[str] = mapped_column(String(40), nullable=False)
+    nombre: Mapped[str] = mapped_column(String(100), nullable=False)
+    tipo: Mapped[str] = mapped_column(String(30), default="CLASIFICACION")
+    grupos_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    datos_pack_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
 class SolicitudParticipacion(Base):
     """Pedido de compra o venta de participación en otro club, con DOS
     aprobaciones secuenciales: primero tu propia directiva (gastar/aceptar
@@ -198,6 +341,12 @@ class SolicitudParticipacion(Base):
 
 
 class Jugador(Base):
+    datos_pack_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    @property
+    def datos_pack(self) -> dict:
+        return json.loads(self.datos_pack_json) if self.datos_pack_json else {}
+
     __tablename__ = "jugadores"
 
     id_jugador: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -257,11 +406,18 @@ class Jugador(Base):
 
     energia: Mapped[int] = mapped_column(Integer, default=100)
     moral: Mapped[int] = mapped_column(Integer, default=75)
+    # Vínculo persistente con el DT del club actual. Las charlas y el trato
+    # deportivo lo modifican; influye en la disposición a renovar.
+    relacion_dt: Mapped[int] = mapped_column(Integer, default=50)
 
     valor_mercado: Mapped[int] = mapped_column(Integer, default=50_000)
     salario: Mapped[int] = mapped_column(Integer, default=2_000)
 
     lesionado: Mapped[bool] = mapped_column(Boolean, default=False)
+    # True solo durante una ventana internacional activa. El jugador sigue
+    # perteneciendo a su club, pero no puede ser elegido para un partido de
+    # club hasta que la convocatoria termine.
+    en_convocatoria: Mapped[bool] = mapped_column(Boolean, default=False)
     semanas_lesion: Mapped[int] = mapped_column(Integer, default=0)
     tipo_lesion: Mapped[str | None] = mapped_column(String(50), nullable=True)
 
@@ -454,6 +610,7 @@ class OfertaFichaje(Base):
     # Salario semanal del contrato nuevo pactado con el jugador (además del
     # precio pactado con el club vendedor). Se aplica recién al efectivizarse.
     salario_pactado: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    condiciones_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     estado: Mapped[str] = mapped_column(String(20), default="PENDIENTE")  # PENDIENTE, ACEPTADA, RECHAZADA
     efectivizada: Mapped[bool] = mapped_column(Boolean, default=False)
     creado: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
@@ -523,3 +680,49 @@ class PaqueteClubes(Base):
     # internacionales, mismas claves que engine/copa_engine.py COMPETENCIAS.
     competencias_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     fecha_creacion: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    # ---- Sistema de Data Packs (.pmpack) — ver pack_engine.py ----
+    # Slug estable e independiente de `nombre` (que el usuario puede editar
+    # libremente) — identifica al pack a través de export/import/duplicado,
+    # ej. "partidos-real-data", "mi-liga-3f9a2c".
+    pack_id: Mapped[str | None] = mapped_column(String(60), unique=True, nullable=True)
+    version: Mapped[str] = mapped_column(String(20), default="1.0.0")
+    autor: Mapped[str] = mapped_column(String(100), default="")
+    descripcion: Mapped[str] = mapped_column(Text, default="")
+    # Protege de BORRADO (no de edición) — ver DELETE /paquetes-clubes/{id}.
+    # "PARTIDOS Real Data" (sembrado desde fixtures_prueba/, si existe) es el
+    # único caso hoy; "Base Ficticia" ni siquiera es una fila de esta tabla
+    # (es una entrada sintética que arma el propio endpoint GET).
+    es_oficial: Mapped[bool] = mapped_column(Boolean, default=False)
+    # {"ARG1": {"BOC": {"ciudad":"", "estadio":"", "capacidad":"", "manager":"",
+    # "staff":""}}} — campos de texto libre por club, todavía no consumidos
+    # por el motor de partido (Equipo no modela ciudad/estadio/manager como
+    # entidades propias); viajan en el pack para cuando el juego los use.
+    metadata_clubes_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    configuracion_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    fecha_actualizacion: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    # Si este pack nació de "Duplicar" otro, referencia al original — el
+    # original queda intacto (duplicar es una copia, nunca una referencia
+    # compartida). NULL = pack creado desde cero o importado.
+    id_pack_origen: Mapped[int | None] = mapped_column(ForeignKey("paquetes_clubes.id_paquete"), nullable=True)
+
+
+class Conversacion(Base):
+    __tablename__ = 'conversaciones_jugador'
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    id_jugador: Mapped[int] = mapped_column(ForeignKey('jugadores.id_jugador'))
+    id_equipo: Mapped[int] = mapped_column(ForeignKey('equipos.id_equipo'))
+    fecha: Mapped[date] = mapped_column(Date)
+    tema: Mapped[str] = mapped_column(String(30))
+    respuesta: Mapped[str] = mapped_column(String(400))
+    delta_moral: Mapped[int] = mapped_column(Integer)
+
+
+
+class HistorialNegociacion(Base):
+    __tablename__ = 'historial_negociacion'
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    id_jugador: Mapped[int] = mapped_column(ForeignKey('jugadores.id_jugador'))
+    id_equipo: Mapped[int] = mapped_column(ForeignKey('equipos.id_equipo'))
+    fecha: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    detalle_json: Mapped[str] = mapped_column(Text)

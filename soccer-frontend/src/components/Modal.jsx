@@ -9,13 +9,27 @@ const FOCUSABLE_SELECTOR =
 // esto quedan con la misma accesibilidad que el resto sin forzarlos al
 // tamaño grande.
 const TAMANOS = {
-  lg: 'w-full h-full max-w-6xl max-h-[94vh]',
+  lg: 'w-full h-full',
+  screen: 'w-full h-full',
   sm: 'w-full max-w-md',
 };
 
 export default function Modal({ open, onClose, children, labelledBy, size = 'lg' }) {
   const contentRef = useRef(null);
   const previousFocusRef = useRef(null);
+
+  useEffect(() => {
+    if (!open || !contentRef.current) return;
+    const changed = [];
+    let branch = contentRef.current.parentElement;
+    while (branch?.parentElement && branch.parentElement !== document.body) {
+      for (const sibling of branch.parentElement.children) {
+        if (sibling !== branch) { changed.push([sibling, sibling.inert]); sibling.inert = true; }
+      }
+      branch = branch.parentElement;
+    }
+    return () => { for (const [element, inert] of changed) element.inert = inert; };
+  }, [open]);
 
   useEffect(() => {
     if (!open) return;
@@ -63,7 +77,7 @@ export default function Modal({ open, onClose, children, labelledBy, size = 'lg'
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-3 sm:p-6"
+      className={`fixed inset-0 z-[80] flex items-center justify-center bg-black/80 ${size === 'sm' ? 'p-3 sm:p-6' : 'fm-workspace-overlay'}`}
       onClick={onClose}
     >
       <div
@@ -72,7 +86,7 @@ export default function Modal({ open, onClose, children, labelledBy, size = 'lg'
         aria-modal="true"
         aria-labelledby={labelledBy}
         tabIndex={-1}
-        className={`bg-[#121e36] border border-slate-700 rounded-2xl shadow-2xl overflow-y-auto scroll-slide outline-none ${TAMANOS[size]}`}
+        className={`fm-modal bg-[#121e36] border border-slate-700 overflow-y-auto scroll-slide outline-none ${size === 'sm' ? 'rounded-xl' : 'fm-workspace'} ${TAMANOS[size]}`}
         onClick={(e) => e.stopPropagation()}
       >
         {children}

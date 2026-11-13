@@ -26,6 +26,7 @@ import TablaPage from './pages/TablaPage';
 import MatchDayPage from './pages/MatchDayPage';
 import JugarPage from './pages/JugarPage';
 import ClubPage from './pages/ClubPage';
+import SeleccionesPage from './pages/SeleccionesPage';
 
 const API_URL = "http://127.0.0.1:8000";
 const INICIO_TEMPORADA = new Date(2027, 1, 1); // debe coincidir con seed.py: INICIO_TEMPORADA
@@ -45,7 +46,7 @@ function GameLayout({
   const gestionandoOtroClub = clubActivo !== idEquipoUsuario;
 
   return (
-    <div className="h-screen bg-[#0b1326] text-slate-100 flex flex-col font-sans overflow-hidden">
+    <div className="fm-app h-screen bg-[#0b1326] text-slate-100 flex flex-col font-sans overflow-hidden">
       <Header
         fechaActual={fechaActualDate}
         diaNumero={diaNumero}
@@ -75,7 +76,7 @@ function GameLayout({
           setClubActivo={setClubActivo}
         />
 
-        <main className="flex-1 px-6 pb-6 pt-16 sm:pt-6 overflow-y-auto scroll-slide min-h-0">
+        <main className="fm-main flex-1 overflow-y-auto scroll-slide min-h-0 min-w-0">
           <Routes>
             <Route path="/" element={<Navigate to="/panel" replace />} />
             <Route path="/panel" element={<PanelPage API_URL={API_URL} idEquipoUsuario={idEquipoUsuario} idPartida={idPartida} fechaActual={fechaActualISO} />} />
@@ -92,6 +93,7 @@ function GameLayout({
             <Route path="/academia" element={<AcademiaPage API_URL={API_URL} idEquipoUsuario={clubActivo} idPartida={idPartida} />} />
             <Route path="/cuerpo-tecnico" element={<CuerpoTecnicoPage API_URL={API_URL} idEquipoUsuario={clubActivo} />} />
             <Route path="/multiclub" element={<MulticlubPage API_URL={API_URL} idEquipoUsuario={idEquipoUsuario} />} />
+            <Route path="/selecciones" element={<SeleccionesPage API_URL={API_URL} idPartida={idPartida} fechaActual={fechaActualISO} />} />
             <Route path="/economia" element={<EconomiaPage API_URL={API_URL} idEquipoUsuario={clubActivo} />} />
             <Route path="/directiva" element={<DirectivaPage API_URL={API_URL} idPartida={idPartida} onEstadoCambiado={onEstadoCambiado} />} />
             <Route path="/jugar" element={<JugarPage />} />
@@ -108,6 +110,10 @@ export default function App() {
   // solo importa mientras `vista === 'crear'`, se elige en InicioPage y se
   // descarta al volver — ver InicioPage.jsx.
   const [dataset, setDataset] = useState(null);
+  // Data Pack elegido en InicioPage antes de entrar a CrearCarreraPage (ver
+  // pack_engine.py) — null si se eligió Base Ficticia o si se entra por
+  // otro camino que no pre-selecciona nada.
+  const [idPaquetePreseleccionado, setIdPaquetePreseleccionado] = useState(null);
   const [idPartida, setIdPartida] = useState(() => {
     const guardado = localStorage.getItem('id_partida');
     return guardado ? Number(guardado) : null;
@@ -350,8 +356,9 @@ export default function App() {
         <CrearCarreraPage
           API_URL={API_URL}
           dataset={dataset}
+          idPaqueteInicial={idPaquetePreseleccionado}
           onCarreraCreada={seleccionarPartida}
-          onVolver={() => { setVista('inicio'); setDataset(null); }}
+          onVolver={() => { setVista('inicio'); setDataset(null); setIdPaquetePreseleccionado(null); }}
         />
       );
     } else if (vista === 'editor') {
@@ -361,7 +368,7 @@ export default function App() {
         <InicioPage
           API_URL={API_URL}
           onContinuar={seleccionarPartida}
-          onNuevaPartida={(ds) => { setDataset(ds); setVista('crear'); }}
+          onNuevaPartida={(ds, idPaquete) => { setDataset(ds); setIdPaquetePreseleccionado(idPaquete ?? null); setVista('crear'); }}
           onAbrirEditor={() => setVista('editor')}
         />
       );

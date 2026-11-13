@@ -5,14 +5,18 @@ const NUEVO = '__nuevo__';
 const NINGUNO = '__ninguno__';
 const LIGAS_COMPLETAS_DEFAULT = ['ARG1', 'BRA1', 'ESP1', 'ING1'];
 
-export default function CrearCarreraPage({ API_URL, dataset, onCarreraCreada, onVolver }) {
+export default function CrearCarreraPage({ API_URL, dataset, idPaqueteInicial, onCarreraCreada, onVolver }) {
   const [catalogo, setCatalogo] = useState(null);
   const [nombreDT, setNombreDT] = useState('');
   const [paquetes, setPaquetes] = useState([]);
-  const [paqueteElegido, setPaqueteElegido] = useState(NINGUNO); // NINGUNO | NUEVO | id_paquete
+  // NINGUNO | NUEVO | id_paquete (string — viene de un <select>, o
+  // pre-cargado desde InicioPage si el usuario ya eligió un Data Pack ahí).
+  const [paqueteElegido, setPaqueteElegido] = useState(() => (idPaqueteInicial ? String(idPaqueteInicial) : NINGUNO));
   const [nombresPaqueteElegido, setNombresPaqueteElegido] = useState(null);
   const [jugadoresPaqueteElegido, setJugadoresPaqueteElegido] = useState(null);
   const [competenciasPaqueteElegido, setCompetenciasPaqueteElegido] = useState(null);
+  const [configuracionPaquete, setConfiguracionPaquete] = useState({});
+  const [cargandoPaquete, setCargandoPaquete] = useState(false);
   const [csvTexto, setCsvTexto] = useState('');
   const [csvJugadoresTexto, setCsvJugadoresTexto] = useState('');
   const [competencias, setCompetencias] = useState({
@@ -49,25 +53,37 @@ export default function CrearCarreraPage({ API_URL, dataset, onCarreraCreada, on
 
   useEffect(() => {
     if (dataset !== 'personalizada') return;
-    fetch(`${API_URL}/paquetes-clubes`).then((r) => r.json()).then(setPaquetes).catch((e) => console.error('Error cargando paquetes de clubes:', e));
+    fetch(`${API_URL}/paquetes-clubes`)
+      .then((r) => r.json())
+      .then((data) => setPaquetes(data.filter((p) => p.id_paquete != null)))
+      .catch((e) => console.error('Error cargando paquetes de clubes:', e));
   }, [API_URL, dataset]);
 
   // Si se elige un paquete guardado, trae sus nombres/jugadores/competencias para armar el picker.
   useEffect(() => {
+    let vigente = true;
+    setNombresPaqueteElegido(null);
+    setConfiguracionPaquete({});
     if (paqueteElegido === NINGUNO || paqueteElegido === NUEVO) {
       setNombresPaqueteElegido(null);
       setJugadoresPaqueteElegido(null);
       setCompetenciasPaqueteElegido(null);
+      setCargandoPaquete(false);
       return;
     }
+    setCargandoPaquete(true);
     fetch(`${API_URL}/paquetes-clubes/${paqueteElegido}`)
-      .then((r) => r.json())
+      .then(async (r) => { const data = await r.json(); if (!r.ok) throw new Error(data.detail || 'No se pudo cargar el pack.'); return data; })
       .then((data) => {
+        if (!vigente) return;
         setNombresPaqueteElegido(data.nombres_clubes);
         setJugadoresPaqueteElegido(data.jugadores_clubes || null);
         setCompetenciasPaqueteElegido(data.competencias || null);
+        setConfiguracionPaquete(data.configuracion || {});
       })
-      .catch((e) => console.error('Error cargando el paquete:', e));
+      .catch((e) => { if (vigente) setError(e.message); })
+      .finally(() => { if (vigente) setCargandoPaquete(false); });
+    return () => { vigente = false; };
   }, [API_URL, paqueteElegido]);
 
   const nombresCustom = dataset === 'personalizada'
@@ -83,6 +99,17 @@ export default function CrearCarreraPage({ API_URL, dataset, onCarreraCreada, on
     : null;
 
   const ligaInfo = catalogo?.ligas.find((l) => l.codigo === ligaSeleccionada);
+  const ligasDisponibles = (catalogo?.ligas || [])
+    .filter((l) => !configuracionPaquete.solo_clubes_pack || nombresCustom?.[l.codigo])
+    .map((l) => ({ ...l, nombre: nombresCustom?.[l.codigo]?.find((fila) => fila[3])?.[3] || l.nombre }));
+  const packNoDisponible = cargandoPaquete || (dataset === 'personalizada' && paqueteElegido !== NINGUNO && paqueteElegido !== NUEVO && !nombresPaqueteElegido);
+
+  useEffect(() => {
+    if (configuracionPaquete.solo_clubes_pack && nombresPaqueteElegido && !nombresPaqueteElegido[ligaSeleccionada]) {
+      setLigaSeleccionada(Object.keys(nombresPaqueteElegido)[0] || '');
+      setClubSeleccionado('');
+    }
+  }, [configuracionPaquete, nombresPaqueteElegido, ligaSeleccionada]);
   // Con datos personalizados el club se guarda con el nombre real solo, sin
   // el código antepuesto (a diferencia del catálogo ficticio, que sí lo
   // lleva) — ver seed.py::crear_partida.
@@ -95,6 +122,7 @@ export default function CrearCarreraPage({ API_URL, dataset, onCarreraCreada, on
   }, [ligaSeleccionada, csvTexto, paqueteElegido]);
 
   const crear = async (randomizar) => {
+    if (packNoDisponible) return;
     setCreando(true);
     setError(null);
     try {
@@ -248,6 +276,14 @@ export default function CrearCarreraPage({ API_URL, dataset, onCarreraCreada, on
               </select>
             </div>
 
+            {paqueteElegido !== NINGUNO && paqueteElegido !== NUEVO && !cargandoPaquete && (
+              <div className="rounded-xl border border-sky-500/25 bg-sky-950/30 px-3 py-2 text-xs text-slate-300">
+                {(configuracionPaquete.selecciones?.equipos?.length || 0) > 0 && <p>Incluye {configuracionPaquete.selecciones.equipos.length} selecciones nacionales.</p>}
+                {(configuracionPaquete.multiclub?.afiliaciones?.length || configuracionPaquete.multiclub?.redes_marca?.length || 0) > 0 && <p>Incluye relaciones multiclub que se crearán con esta carrera.</p>}
+                {(configuracionPaquete.selecciones?.equipos?.length || 0) === 0 && !(configuracionPaquete.multiclub?.afiliaciones?.length || configuracionPaquete.multiclub?.redes_marca?.length) && <p>Este pack todavía no incluye selecciones ni redes multiclub.</p>}
+              </div>
+            )}
+
             {paqueteElegido === NUEVO && (
               <div className="space-y-4">
                 <div>
@@ -357,7 +393,7 @@ export default function CrearCarreraPage({ API_URL, dataset, onCarreraCreada, on
                 onChange={(e) => setLigaSeleccionada(e.target.value)}
                 className="w-full bg-[#0b1326] border border-slate-700 p-3 rounded-xl text-white text-sm"
               >
-                {catalogo.ligas.map((l) => (
+                {ligasDisponibles.map((l) => (
                   <option key={l.codigo} value={l.codigo}>{l.nombre} ({l.codigo})</option>
                 ))}
               </select>
@@ -389,7 +425,7 @@ export default function CrearCarreraPage({ API_URL, dataset, onCarreraCreada, on
                 {['UEFA', 'CONMEBOL'].map((confed) => (
                   <React.Fragment key={confed}>
                     <p className="col-span-2 text-[10px] font-bold text-sky-400 uppercase tracking-wider mt-1 first:mt-0">{confed}</p>
-                    {catalogo.ligas.filter((l) => l.confederacion === confed).map((l) => {
+                    {ligasDisponibles.filter((l) => l.confederacion === confed).map((l) => {
                       const forzada = l.codigo === ligaSeleccionada;
                       const marcada = forzada || ligasCompletas.has(l.codigo);
                       return (
@@ -413,18 +449,23 @@ export default function CrearCarreraPage({ API_URL, dataset, onCarreraCreada, on
         )}
 
         {error && <p className="text-xs text-rose-400">{error}</p>}
+        {creando && (
+          <p className="rounded-xl border border-sky-400/20 bg-sky-500/10 px-3 py-2 text-xs leading-5 text-sky-100">
+            Preparando planteles, contratos y selecciones del pack. Con el pack completo puede tardar hasta dos minutos. No cierres esta pantalla.
+          </p>
+        )}
 
         <div className="flex gap-3">
           <button
             onClick={() => crear(false)}
-            disabled={creando || !clubSeleccionado || !nombreDT.trim()}
+            disabled={creando || packNoDisponible || !clubSeleccionado || !nombreDT.trim()}
             className="flex-1 bg-sky-500 hover:bg-sky-400 disabled:opacity-40 text-slate-950 font-bold px-4 py-3 rounded-xl text-sm"
           >
-            {creando ? 'Creando...' : 'Empezar con este club'}
+            {creando ? 'Creando carrera…' : 'Empezar con este club'}
           </button>
           <button
             onClick={() => crear(true)}
-            disabled={creando || !nombreDT.trim()}
+            disabled={creando || packNoDisponible || !nombreDT.trim()}
             className="flex-1 bg-slate-800 hover:bg-slate-700 disabled:opacity-40 text-slate-300 font-bold px-4 py-3 rounded-xl text-sm"
           >
             Randomizar

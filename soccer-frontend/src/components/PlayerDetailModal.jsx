@@ -1,3 +1,4 @@
+import PlayerFace from './PlayerFace';
 import React, { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import Modal from './Modal';
@@ -73,7 +74,7 @@ function ListaAtributos({ titulo, items, jugador }) {
         {items.map(([clave, label]) => (
           <div key={clave} className="flex justify-between text-xs py-1.5 border-b border-slate-800/40 last:border-0">
             <span className="text-slate-400">{label}</span>
-            <span className="font-bold text-slate-100">{jugador[clave] ?? '-'}</span>
+            <span className={`font-bold ${jugador[clave] >= 85 ? 'text-amber-300' : jugador[clave] >= 75 ? 'text-emerald-400' : jugador[clave] >= 60 ? 'text-sky-300' : 'text-slate-300'}`}>{jugador[clave] ?? '-'}</span>
           </div>
         ))}
       </div>
@@ -156,6 +157,8 @@ const FOCO_INDIVIDUAL_LABEL = { OFENSIVO: 'Ofensivo', DEFENSIVO: 'Defensivo', PA
 
 export default function PlayerDetailModal({ jugador, open, onClose, API_URL, onNegociar, onRenovar, onPrecontrato, onFicharLibre, onToggleTransferible, onOfrecer, onCeder, onEnviarOjeador, onHablar, onGuardarFocoIndividual }) {
   const [historial, setHistorial] = useState([]);
+  const [tab, setTab] = useState('general');
+  useEffect(() => setTab('general'), [jugador?.id_jugador]);
   const [detalle, setDetalle] = useState(null);
   const [focoIndividualDraft, setFocoIndividualDraft] = useState('');
   const [guardandoFoco, setGuardandoFoco] = useState(false);
@@ -204,14 +207,23 @@ export default function PlayerDetailModal({ jugador, open, onClose, API_URL, onN
         { label: 'Técnico', valor: promedio(datos, ATRIBUTOS_TECNICO.map(([c]) => c)) ?? 0 },
         { label: 'Mental', valor: promedio(datos, ATRIBUTOS_MENTAL.map(([c]) => c)) ?? 0 },
         { label: 'Físico', valor: promedio(datos, ATRIBUTOS_FISICO.map(([c]) => c)) ?? 0 },
+        { label: 'Ritmo', valor: datos.ritmo ?? 0 },
+        { label: 'Visión', valor: datos.vision ?? 0 },
+        { label: 'Ataque', valor: datos.ataque ?? 0 },
+        { label: 'Aéreo', valor: datos.cabeceo ?? 0 },
+        { label: 'Defensa', valor: datos.defensa ?? 0 },
         ...(datos.posicion === 'POR' ? [{ label: 'Portería', valor: datos.porteria ?? 0 }] : []),
       ]
     : [];
 
   return (
     <Modal open={open} onClose={onClose} labelledBy="player-modal-title">
-      <div className="p-8 sm:p-12 max-w-5xl mx-auto space-y-8">
-        <div className="flex items-start justify-between gap-4 border-b border-slate-800 pb-6">
+      <div className="fm-player-screen">
+        <nav className="fm-section-tabs" aria-label="Ficha del jugador">
+          <button onClick={onClose}>← Volver</button>
+          {[["general", "Vista general"], ["contrato", "Contrato"], ["historial", "Historial"]].map(([id, label]) => <button key={id} onClick={() => setTab(id)} aria-current={tab === id ? 'page' : undefined}>{label}</button>)}
+        </nav>
+        <div className="fm-player-identity"><PlayerFace player={datos} API_URL={API_URL} className="fm-profile-face" />
           <div>
             <h3 id="player-modal-title" className="text-3xl font-black text-white">{datos.nombre}</h3>
             <p className="text-sm text-slate-400 mt-1">
@@ -270,7 +282,7 @@ export default function PlayerDetailModal({ jugador, open, onClose, API_URL, onN
           </div>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-[160px_1fr] gap-4 sm:gap-6 items-start">
+        <div hidden={tab !== 'general'} className="fm-player-overview">
           <div className="space-y-4">
             <MiniPitchPosicion posicion={datos.posicion} posicionEspecifica={datos.posicion_especifica} />
             <div className="text-xs space-y-0">
@@ -310,7 +322,7 @@ export default function PlayerDetailModal({ jugador, open, onClose, API_URL, onN
           <div className="space-y-4">
             {desgloseDisponible ? (
               <div className="space-y-4">
-                <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+                <div className="fm-attribute-columns">
                   <ListaAtributos titulo="Técnico" items={ATRIBUTOS_TECNICO} jugador={datos} />
                   <ListaAtributos titulo="Mental" items={ATRIBUTOS_MENTAL} jugador={datos} />
                   <ListaAtributos titulo="Físico" items={ATRIBUTOS_FISICO} jugador={datos} />
@@ -346,8 +358,22 @@ export default function PlayerDetailModal({ jugador, open, onClose, API_URL, onN
           </div>
         </div>
 
+        {tab === 'contrato' && <section className="fm-contract-overview">
+          <div className="fm-panel"><h4>Condiciones actuales</h4>
+            <Stat label="Valor de mercado (USD)" value={`$${(datos.valor_mercado || 0).toLocaleString('es-AR')}`} />
+            <Stat label="Salario semanal (USD)" value={`$${(datos.salario || 0).toLocaleString('es-AR')}`} />
+            <Stat label="Vencimiento" value={datos.fecha_fin_contrato || 'Sin contrato'} />
+            <Stat label="Cláusula de rescisión" value={datos.clausula_rescision ? `$${datos.clausula_rescision.toLocaleString('es-AR')}` : 'Sin cláusula'} />
+          </div>
+          <div className="fm-panel"><h4>Situación del jugador</h4>
+            <Stat label="Rol" value={ROL_LABEL[datos.rol] || datos.rol} />
+            <Stat label="Transferible" value={datos.en_transferible ? 'Sí' : 'No'} />
+            <Stat label="Precontrato" value={datos.id_equipo_precontrato ? 'Acordado' : 'Sin acuerdo'} />
+          </div>
+        </section>}
+        {tab === 'historial' && historial.length === 0 && <p className="p-6 text-slate-400">Todavía no hay temporadas completadas en esta carrera.</p>}
         {historial.length > 0 && (
-          <div className="border-t border-slate-800 pt-5">
+          <div hidden={tab !== 'historial'} className="fm-history border-t border-slate-800 pt-5">
             <h4 className="text-xs font-bold text-sky-400 uppercase tracking-wider mb-3">Evolución de carrera</h4>
             <div className="overflow-x-auto scroll-slide">
               <table className="w-full text-xs min-w-[420px]">
@@ -378,7 +404,7 @@ export default function PlayerDetailModal({ jugador, open, onClose, API_URL, onN
           </div>
         )}
 
-        <div className="flex gap-3 pt-4 flex-wrap">
+        <div className="fm-player-actions flex gap-3 pt-4 flex-wrap">
           {onHablar && (
             <button
               onClick={onHablar}

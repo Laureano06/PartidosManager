@@ -1,11 +1,39 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 
+function ClubProximoPartido({ id, nombre, escudo, API_URL }) {
+  const [fallo, setFallo] = useState(false);
+  useEffect(() => setFallo(false), [escudo]);
+  const src = escudo?.startsWith('/static/') ? `${API_URL}${escudo}` : escudo;
+  return (
+    <Link to={`/club/${id}`} className="inline-flex items-center gap-2 hover:text-sky-400 hover:underline">
+      {src && !fallo ? (
+        <img src={src} alt="" onError={() => setFallo(true)} className="w-10 h-10 sm:w-12 sm:h-12 object-contain shrink-0" />
+      ) : (
+        <span aria-hidden="true" className="w-10 h-10 sm:w-12 sm:h-12 rounded-lg bg-sky-950 text-sky-300 flex items-center justify-center shrink-0">{nombre?.trim().charAt(0) || '?'}</span>
+      )}
+      <span>{nombre}</span>
+    </Link>
+  );
+}
+
 export default function PanelPage({ API_URL, idEquipoUsuario, idPartida, fechaActual }) {
   const [mails, setMails] = useState([]);
   const [tabla, setTabla] = useState([]);
   const [partidos, setPartidos] = useState([]);
   const [cargando, setCargando] = useState(true);
+  const [escudos, setEscudos] = useState({});
+
+  useEffect(() => {
+    const controller = new AbortController();
+    setEscudos({});
+    if (!idPartida) return;
+    fetch(`${API_URL}/equipos?id_partida=${idPartida}`, { signal: controller.signal })
+      .then((r) => { if (!r.ok) throw new Error('No se pudieron cargar los escudos'); return r.json(); })
+      .then((equipos) => setEscudos(Object.fromEntries(equipos.map((e) => [e.id_equipo, e.escudo_url]))))
+      .catch((error) => { if (error.name !== 'AbortError') console.error('Error cargando escudos:', error); });
+    return () => controller.abort();
+  }, [API_URL, idPartida]);
 
   const cargarTodo = useCallback(() => {
     if (!idEquipoUsuario) return;
@@ -41,11 +69,11 @@ export default function PanelPage({ API_URL, idEquipoUsuario, idPartida, fechaAc
           </span>
           <h4 className="text-xl font-black text-white mt-1">
             {cargando ? 'Cargando...' : proximoPartido ? (
-              <>
-                <Link to={`/club/${proximoPartido.id_local}`} className="hover:text-sky-400 hover:underline">{proximoPartido.nombre_local}</Link>
-                {' vs. '}
-                <Link to={`/club/${proximoPartido.id_visitante}`} className="hover:text-sky-400 hover:underline">{proximoPartido.nombre_visitante}</Link>
-              </>
+              <span className="flex flex-wrap items-center gap-3 mt-2">
+                <ClubProximoPartido id={proximoPartido.id_local} nombre={proximoPartido.nombre_local} escudo={escudos[proximoPartido.id_local]} API_URL={API_URL} />
+                <span className="text-sm text-slate-400">vs.</span>
+                <ClubProximoPartido id={proximoPartido.id_visitante} nombre={proximoPartido.nombre_visitante} escudo={escudos[proximoPartido.id_visitante]} API_URL={API_URL} />
+              </span>
             ) : 'Temporada completa'}
           </h4>
           {proximoPartido && (

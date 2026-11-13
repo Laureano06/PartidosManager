@@ -1,0 +1,292 @@
+[
+  {
+    "antipattern": "gray-on-color",
+    "name": "Gray text on colored background",
+    "description": "Gray text looks washed out on colored backgrounds. Use a darker shade of the background color instead, or white/near-white for contrast.",
+    "severity": "warning",
+    "category": "quality",
+    "file": "C:\\Users\\laure\\OneDrive\\Documentos\\ChatGPT\\CLAUDE PARTIDOS MANAGER\\source\\proyectoSoccerManager\\soccer-frontend\\src\\components\\PlayerDetailModal.jsx",
+    "line": 240,
+    "snippet": "text-slate-400 on bg-amber-950"
+  },
+  {
+    "antipattern": "gray-on-color",
+    "name": "Gray text on colored background",
+    "description": "Gray text looks washed out on colored backgrounds. Use a darker shade of the background color instead, or white/near-white for contrast.",
+    "severity": "warning",
+    "category": "quality",
+    "file": "C:\\Users\\laure\\OneDrive\\Documentos\\ChatGPT\\CLAUDE PARTIDOS MANAGER\\source\\proyectoSoccerManager\\soccer-frontend\\src\\components\\PlayerDetailModal.jsx",
+    "line": 273,
+    "snippet": "text-slate-950 on bg-sky-500"
+  },
+  {
+    "antipattern": "gray-on-color",
+    "name": "Gray text on colored background",
+    "description": "Gray text looks washed out on colored backgrounds. Use a darker shade of the background color instead, or white/near-white for contrast.",
+    "severity": "warning",
+    "category": "quality",
+    "file": "C:\\Users\\laure\\OneDrive\\Documentos\\ChatGPT\\CLAUDE PARTIDOS MANAGER\\source\\proyectoSoccerManager\\soccer-frontend\\src\\components\\PlayerDetailModal.jsx",
+    "line": 309,
+    "snippet": "text-slate-950 on bg-sky-500"
+  },
+  {
+    "antipattern": "gray-on-color",
+    "name": "Gray text on colored background",
+    "description": "Gray text looks washed out on colored backgrounds. Use a darker shade of the background color instead, or white/near-white for contrast.",
+    "severity": "warning",
+    "category": "quality",
+    "file": "C:\\Users\\laure\\OneDrive\\Documentos\\ChatGPT\\CLAUDE PARTIDOS MANAGER\\source\\proyectoSoccerManager\\soccer-frontend\\src\\components\\PlayerDetailModal.jsx",
+    "line": 414,
+    "snippet": "text-slate-950 on bg-sky-500"
+  },
+  {
+    "antipattern": "gray-on-color",
+    "name": "Gray text on colored background",
+    "description": "Gray text looks washed out on colored backgrounds. Use a darker shade of the background color instead, or white/near-white for contrast.",
+    "severity": "warning",
+    "category": "quality",
+    "file": "C:\\Users\\laure\\OneDrive\\Documentos\\ChatGPT\\CLAUDE PARTIDOS MANAGER\\source\\proyectoSoccerManager\\soccer-frontend\\src\\components\\PlayerDetailModal.jsx",
+    "line": 422,
+    "snippet": "text-slate-950 on bg-amber-400"
+  },
+  {
+    "antipattern": "gray-on-color",
+    "name": "Gray text on colored background",
+    "description": "Gray text looks washed out on colored backgrounds. Use a darker shade of the background color instead, or white/near-white for contrast.",
+    "severity": "warning",
+    "category": "quality",
+    "file": "C:\\Users\\laure\\OneDrive\\Documentos\\ChatGPT\\CLAUDE PARTIDOS MANAGER\\source\\proyectoSoccerManager\\soccer-frontend\\src\\components\\PlayerDetailModal.jsx",
+    "line": 430,
+    "snippet": "text-slate-950 on bg-emerald-500"
+  },
+  {
+    "antipattern": "gray-on-color",
+    "name": "Gray text on colored background",
+    "description": "Gray text looks washed out on colored backgrounds. Use a darker shade of the background color instead, or white/near-white for contrast.",
+    "severity": "warning",
+    "category": "quality",
+    "file": "C:\\Users\\laure\\OneDrive\\Documentos\\ChatGPT\\CLAUDE PARTIDOS MANAGER\\source\\proyectoSoccerManager\\soccer-frontend\\src\\components\\PlayerDetailModal.jsx",
+    "line": 438,
+    "snippet": "text-slate-950 on bg-sky-500"
+  },
+  {
+    "antipattern": "gray-on-color",
+    "name": "Gray text on colored background",
+    "description": "Gray text looks washed out on colored backgrounds. Use a darker shade of the background color instead, or white/near-white for contrast.",
+    "severity": "warning",
+    "category": "quality",
+    "file": "C:\\Users\\laure\\OneDrive\\Documentos\\ChatGPT\\CLAUDE PARTIDOS MANAGER\\source\\proyectoSoccerManager\\soccer-frontend\\src\\components\\PlayerDetailModal.jsx",
+    "line": 449,
+    "snippet": "text-slate-950 on bg-amber-400"
+  },
+  {
+    "antipattern": "gray-on-color",
+    "name": "Gray text on colored background",
+    "description": "Gray text looks washed out on colored backgrounds. Use a darker shade of the background color instead, or white/near-white for contrast.",
+    "severity": "warning",
+    "category": "quality",
+    "file": "C:\\Users\\laure\\OneDrive\\Documentos\\ChatGPT\\CLAUDE PARTIDOS MANAGER\\source\\proyectoSoccerManager\\soccer-frontend\\src\\components\\PlayerDetailModal.jsx",
+    "line": 458,
+    "snippet": "text-slate-950 on bg-emerald-500"
+  },
+  {
+    "antipattern": "gray-on-color",
+    "name": "Gray text on colored background",
+    "description": "Gray text looks washed out on colored backgrounds. Use a darker shade of the background color instead, or white/near-white for contrast.",
+    "severity": "warning",
+    "category": "quality",
+    "file": "C:\\Users\\laure\\OneDrive\\Documentos\\ChatGPT\\CLAUDE PARTIDOS MANAGER\\source\\proyectoSoccerManager\\soccer-frontend\\src\\components\\PlayerDetailModal.jsx",
+    "line": 466,
+    "snippet": "text-slate-950 on bg-sky-500"
+  },
+  {
+    "antipattern": "gray-on-color",
+    "name": "Gray text on colored background",
+    "description": "Gray text looks washed out on colored backgrounds. Use a darker shade of the background color instead, or white/near-white for contrast.",
+    "severity": "warning",
+    "category": "quality",
+    "file": "C:\\Users\\laure\\OneDrive\\Documentos\\ChatGPT\\CLAUDE PARTIDOS MANAGER\\source\\proyectoSoccerManager\\soccer-frontend\\src\\components\\NegociacionFichajeModal.jsx",
+    "line": 182,
+    "snippet": "text-slate-950 on bg-rose-500"
+  },
+  {
+    "antipattern": "gray-on-color",
+    "name": "Gray text on colored background",
+    "description": "Gray text looks washed out on colored backgrounds. Use a darker shade of the background color instead, or white/near-white for contrast.",
+    "severity": "warning",
+    "category": "quality",
+    "file": "C:\\Users\\laure\\OneDrive\\Documentos\\ChatGPT\\CLAUDE PARTIDOS MANAGER\\source\\proyectoSoccerManager\\soccer-frontend\\src\\components\\NegociacionFichajeModal.jsx",
+    "line": 220,
+    "snippet": "text-slate-950 on bg-sky-500"
+  },
+  {
+    "antipattern": "gray-on-color",
+    "name": "Gray text on colored background",
+    "description": "Gray text looks washed out on colored backgrounds. Use a darker shade of the background color instead, or white/near-white for contrast.",
+    "severity": "warning",
+    "category": "quality",
+    "file": "C:\\Users\\laure\\OneDrive\\Documentos\\ChatGPT\\CLAUDE PARTIDOS MANAGER\\source\\proyectoSoccerManager\\soccer-frontend\\src\\components\\NegociacionFichajeModal.jsx",
+    "line": 237,
+    "snippet": "text-slate-950 on bg-emerald-500"
+  },
+  {
+    "antipattern": "gray-on-color",
+    "name": "Gray text on colored background",
+    "description": "Gray text looks washed out on colored backgrounds. Use a darker shade of the background color instead, or white/near-white for contrast.",
+    "severity": "warning",
+    "category": "quality",
+    "file": "C:\\Users\\laure\\OneDrive\\Documentos\\ChatGPT\\CLAUDE PARTIDOS MANAGER\\source\\proyectoSoccerManager\\soccer-frontend\\src\\components\\NegociacionFichajeModal.jsx",
+    "line": 266,
+    "snippet": "text-slate-950 on bg-emerald-500"
+  },
+  {
+    "antipattern": "gray-on-color",
+    "name": "Gray text on colored background",
+    "description": "Gray text looks washed out on colored backgrounds. Use a darker shade of the background color instead, or white/near-white for contrast.",
+    "severity": "warning",
+    "category": "quality",
+    "file": "C:\\Users\\laure\\OneDrive\\Documentos\\ChatGPT\\CLAUDE PARTIDOS MANAGER\\source\\proyectoSoccerManager\\soccer-frontend\\src\\pages\\TacticasPage.jsx",
+    "line": 92,
+    "snippet": "text-slate-950 on bg-sky-400"
+  },
+  {
+    "antipattern": "gray-on-color",
+    "name": "Gray text on colored background",
+    "description": "Gray text looks washed out on colored backgrounds. Use a darker shade of the background color instead, or white/near-white for contrast.",
+    "severity": "warning",
+    "category": "quality",
+    "file": "C:\\Users\\laure\\OneDrive\\Documentos\\ChatGPT\\CLAUDE PARTIDOS MANAGER\\source\\proyectoSoccerManager\\soccer-frontend\\src\\pages\\TacticasPage.jsx",
+    "line": 92,
+    "snippet": "text-slate-400 on bg-sky-400"
+  },
+  {
+    "antipattern": "gray-on-color",
+    "name": "Gray text on colored background",
+    "description": "Gray text looks washed out on colored backgrounds. Use a darker shade of the background color instead, or white/near-white for contrast.",
+    "severity": "warning",
+    "category": "quality",
+    "file": "C:\\Users\\laure\\OneDrive\\Documentos\\ChatGPT\\CLAUDE PARTIDOS MANAGER\\source\\proyectoSoccerManager\\soccer-frontend\\src\\pages\\TacticasPage.jsx",
+    "line": 92,
+    "snippet": "text-slate-200 on bg-sky-400"
+  },
+  {
+    "antipattern": "gray-on-color",
+    "name": "Gray text on colored background",
+    "description": "Gray text looks washed out on colored backgrounds. Use a darker shade of the background color instead, or white/near-white for contrast.",
+    "severity": "warning",
+    "category": "quality",
+    "file": "C:\\Users\\laure\\OneDrive\\Documentos\\ChatGPT\\CLAUDE PARTIDOS MANAGER\\source\\proyectoSoccerManager\\soccer-frontend\\src\\pages\\TacticasPage.jsx",
+    "line": 148,
+    "snippet": "text-slate-950 on bg-sky-400"
+  },
+  {
+    "antipattern": "gray-on-color",
+    "name": "Gray text on colored background",
+    "description": "Gray text looks washed out on colored backgrounds. Use a darker shade of the background color instead, or white/near-white for contrast.",
+    "severity": "warning",
+    "category": "quality",
+    "file": "C:\\Users\\laure\\OneDrive\\Documentos\\ChatGPT\\CLAUDE PARTIDOS MANAGER\\source\\proyectoSoccerManager\\soccer-frontend\\src\\pages\\TacticasPage.jsx",
+    "line": 148,
+    "snippet": "text-slate-400 on bg-sky-400"
+  },
+  {
+    "antipattern": "gray-on-color",
+    "name": "Gray text on colored background",
+    "description": "Gray text looks washed out on colored backgrounds. Use a darker shade of the background color instead, or white/near-white for contrast.",
+    "severity": "warning",
+    "category": "quality",
+    "file": "C:\\Users\\laure\\OneDrive\\Documentos\\ChatGPT\\CLAUDE PARTIDOS MANAGER\\source\\proyectoSoccerManager\\soccer-frontend\\src\\pages\\TacticasPage.jsx",
+    "line": 148,
+    "snippet": "text-slate-200 on bg-sky-400"
+  },
+  {
+    "antipattern": "gray-on-color",
+    "name": "Gray text on colored background",
+    "description": "Gray text looks washed out on colored backgrounds. Use a darker shade of the background color instead, or white/near-white for contrast.",
+    "severity": "warning",
+    "category": "quality",
+    "file": "C:\\Users\\laure\\OneDrive\\Documentos\\ChatGPT\\CLAUDE PARTIDOS MANAGER\\source\\proyectoSoccerManager\\soccer-frontend\\src\\pages\\TacticasPage.jsx",
+    "line": 471,
+    "snippet": "text-slate-950 on bg-sky-500"
+  },
+  {
+    "antipattern": "gray-on-color",
+    "name": "Gray text on colored background",
+    "description": "Gray text looks washed out on colored backgrounds. Use a darker shade of the background color instead, or white/near-white for contrast.",
+    "severity": "warning",
+    "category": "quality",
+    "file": "C:\\Users\\laure\\OneDrive\\Documentos\\ChatGPT\\CLAUDE PARTIDOS MANAGER\\source\\proyectoSoccerManager\\soccer-frontend\\src\\pages\\TacticasPage.jsx",
+    "line": 532,
+    "snippet": "text-slate-950 on bg-amber-400"
+  },
+  {
+    "antipattern": "gray-on-color",
+    "name": "Gray text on colored background",
+    "description": "Gray text looks washed out on colored backgrounds. Use a darker shade of the background color instead, or white/near-white for contrast.",
+    "severity": "warning",
+    "category": "quality",
+    "file": "C:\\Users\\laure\\OneDrive\\Documentos\\ChatGPT\\CLAUDE PARTIDOS MANAGER\\source\\proyectoSoccerManager\\soccer-frontend\\src\\pages\\TacticasPage.jsx",
+    "line": 532,
+    "snippet": "text-slate-400 on bg-amber-400"
+  },
+  {
+    "antipattern": "gray-on-color",
+    "name": "Gray text on colored background",
+    "description": "Gray text looks washed out on colored backgrounds. Use a darker shade of the background color instead, or white/near-white for contrast.",
+    "severity": "warning",
+    "category": "quality",
+    "file": "C:\\Users\\laure\\OneDrive\\Documentos\\ChatGPT\\CLAUDE PARTIDOS MANAGER\\source\\proyectoSoccerManager\\soccer-frontend\\src\\pages\\TacticasPage.jsx",
+    "line": 546,
+    "snippet": "text-slate-950 on bg-emerald-500"
+  },
+  {
+    "antipattern": "gray-on-color",
+    "name": "Gray text on colored background",
+    "description": "Gray text looks washed out on colored backgrounds. Use a darker shade of the background color instead, or white/near-white for contrast.",
+    "severity": "warning",
+    "category": "quality",
+    "file": "C:\\Users\\laure\\OneDrive\\Documentos\\ChatGPT\\CLAUDE PARTIDOS MANAGER\\source\\proyectoSoccerManager\\soccer-frontend\\src\\pages\\TacticasPage.jsx",
+    "line": 548,
+    "snippet": "text-slate-950 on bg-sky-500"
+  },
+  {
+    "antipattern": "gray-on-color",
+    "name": "Gray text on colored background",
+    "description": "Gray text looks washed out on colored backgrounds. Use a darker shade of the background color instead, or white/near-white for contrast.",
+    "severity": "warning",
+    "category": "quality",
+    "file": "C:\\Users\\laure\\OneDrive\\Documentos\\ChatGPT\\CLAUDE PARTIDOS MANAGER\\source\\proyectoSoccerManager\\soccer-frontend\\src\\pages\\TacticasPage.jsx",
+    "line": 562,
+    "snippet": "text-slate-950 on bg-sky-400"
+  },
+  {
+    "antipattern": "gray-on-color",
+    "name": "Gray text on colored background",
+    "description": "Gray text looks washed out on colored backgrounds. Use a darker shade of the background color instead, or white/near-white for contrast.",
+    "severity": "warning",
+    "category": "quality",
+    "file": "C:\\Users\\laure\\OneDrive\\Documentos\\ChatGPT\\CLAUDE PARTIDOS MANAGER\\source\\proyectoSoccerManager\\soccer-frontend\\src\\pages\\TacticasPage.jsx",
+    "line": 562,
+    "snippet": "text-slate-400 on bg-sky-400"
+  },
+  {
+    "antipattern": "gray-on-color",
+    "name": "Gray text on colored background",
+    "description": "Gray text looks washed out on colored backgrounds. Use a darker shade of the background color instead, or white/near-white for contrast.",
+    "severity": "warning",
+    "category": "quality",
+    "file": "C:\\Users\\laure\\OneDrive\\Documentos\\ChatGPT\\CLAUDE PARTIDOS MANAGER\\source\\proyectoSoccerManager\\soccer-frontend\\src\\pages\\TacticasPage.jsx",
+    "line": 562,
+    "snippet": "text-slate-200 on bg-sky-400"
+  },
+  {
+    "antipattern": "overused-font",
+    "name": "Overused font",
+    "description": "Inter, Roboto, Fraunces, Geist, Plus Jakarta Sans, and Space Grotesk are used on so many sites they no longer feel distinctive. Each new wave of AI-generated UIs converges on the same handful of faces. Choose a face that gives your interface personality.",
+    "severity": "warning",
+    "category": "slop",
+    "file": "C:\\Users\\laure\\OneDrive\\Documentos\\ChatGPT\\CLAUDE PARTIDOS MANAGER\\source\\proyectoSoccerManager\\soccer-frontend\\src\\index.css",
+    "line": 18,
+    "snippet": "font-family:Arial"
+  }
+]

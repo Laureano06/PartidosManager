@@ -31,12 +31,20 @@ export default function InicioPage({ API_URL, onContinuar, onNuevaPartida, onAbr
   const [carreras, setCarreras] = useState(null);
   const [borrando, setBorrando] = useState(null);
   const [idAConfirmarBorrado, setIdAConfirmarBorrado] = useState(null);
+  const [packs, setPacks] = useState(null);
 
   useEffect(() => {
     fetch(`${API_URL}/partidas`)
       .then((r) => r.json())
       .then(setCarreras)
       .catch((e) => { console.error('Error cargando carreras:', e); setCarreras([]); });
+  }, [API_URL]);
+
+  useEffect(() => {
+    fetch(`${API_URL}/paquetes-clubes`)
+      .then((r) => r.json())
+      .then(setPacks)
+      .catch((e) => { console.error('Error cargando Data Packs:', e); setPacks([]); });
   }, [API_URL]);
 
   const idUltimaPartida = (() => {
@@ -115,31 +123,40 @@ export default function InicioPage({ API_URL, onContinuar, onNuevaPartida, onAbr
         {vista === 'nueva' && (
           <div className="space-y-3">
             <div className="flex items-center justify-between">
-              <h2 className="text-sm font-bold text-white">Elegí con qué datos jugar</h2>
+              <h2 className="text-sm font-bold text-white">Elegí con qué Data Pack jugar</h2>
               <button onClick={() => setVista('menu')} className="text-xs text-slate-400 hover:text-slate-300">← Volver</button>
             </div>
 
-            <button
-              onClick={() => onNuevaPartida('ficticia')}
-              className="w-full bg-[#0b1326] hover:bg-sky-950 border border-sky-500/40 p-4 rounded-xl text-left transition flex justify-between items-center"
-            >
-              <div>
-                <p className="font-bold text-sky-300 text-sm">Base Ficticia</p>
-                <p className="text-xs text-slate-400">Ligas, clubes y jugadores generados automáticamente. Sin nombres reales.</p>
-              </div>
-              <span>➔</span>
-            </button>
+            {packs === null && <p className="text-sm text-slate-400 text-center py-6">Cargando Data Packs...</p>}
 
-            <button
-              onClick={() => onNuevaPartida('personalizada')}
-              className="w-full bg-[#0b1326] hover:bg-sky-950 border border-slate-700 p-4 rounded-xl text-left transition flex justify-between items-center"
-            >
-              <div>
-                <p className="font-bold text-slate-200 text-sm">Datos personalizados</p>
-                <p className="text-xs text-slate-400">Usa un paquete de nombres reales cargado en el Editor (o los ficticios por defecto).</p>
+            {packs !== null && (
+              <div className="space-y-2 max-h-96 overflow-y-auto scroll-slide pr-1">
+                {packs.map((p) => (
+                  <button
+                    key={p.pack_id}
+                    onClick={() => onNuevaPartida(p.tipo === 'PROCEDURAL' ? 'ficticia' : 'personalizada', p.id_paquete)}
+                    className={`w-full p-4 rounded-xl text-left transition flex justify-between items-center border ${
+                      p.tipo === 'PROCEDURAL' ? 'bg-[#0b1326] hover:bg-sky-950 border-sky-500/40' : 'bg-[#0b1326] hover:bg-sky-950 border-slate-700'
+                    }`}
+                  >
+                    <div className="min-w-0">
+                      <p className="font-bold text-sm truncate">
+                        <span className={p.tipo === 'PROCEDURAL' ? 'text-sky-300' : 'text-slate-200'}>{p.nombre}</span>
+                        {p.es_oficial && <span className="ml-2 text-[9px] font-bold px-1.5 py-0.5 rounded bg-slate-800 text-slate-400 align-middle">OFICIAL</span>}
+                        {p.version && <span className="ml-2 text-[10px] text-slate-500 align-middle">v{p.version}</span>}
+                      </p>
+                      <p className="text-xs text-slate-400 truncate">{p.descripcion}</p>
+                      {p.tipo !== 'PROCEDURAL' && (
+                        <p className="text-[10px] text-slate-500 mt-0.5">
+                          {p.numberOfClubs} clubes{p.numberOfPlayers ? ` · ${p.numberOfPlayers} jugadores reales` : ''} · {p.numberOfLeagues} ligas
+                        </p>
+                      )}
+                    </div>
+                    <span className="shrink-0 ml-3">➔</span>
+                  </button>
+                ))}
               </div>
-              <span>➔</span>
-            </button>
+            )}
           </div>
         )}
 

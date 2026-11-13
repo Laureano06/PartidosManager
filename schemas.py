@@ -1,9 +1,10 @@
 from datetime import date
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class JugadorOut(BaseModel):
+    datos_pack: dict = Field(default_factory=dict)
     model_config = ConfigDict(from_attributes=True)
     id_jugador: int
     id_equipo: int | None
@@ -40,9 +41,11 @@ class JugadorOut(BaseModel):
     porteria: int
     energia: int
     moral: int
+    relacion_dt: int = 50
     valor_mercado: int
     salario: int
     lesionado: bool
+    en_convocatoria: bool = False
     semanas_lesion: int
     tipo_lesion: str | None
     rol: str
@@ -68,6 +71,7 @@ class LigaOut(BaseModel):
 
 
 class EquipoOut(BaseModel):
+    datos_pack: dict = Field(default_factory=dict)
     model_config = ConfigDict(from_attributes=True)
     id_equipo: int
     id_liga: int
@@ -177,6 +181,8 @@ class NegociarContratoTraspasoIn(BaseModel):
     salario_ofrecido: int
     ronda: int = 0
     addons: list[AddOnIn] = []
+    anios: int = Field(default=3, ge=1, le=5)
+    clausula_rescision: int | None = Field(default=None, gt=0)
 
 
 class SimularJornadaIn(BaseModel):

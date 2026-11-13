@@ -45,7 +45,7 @@ function PanelModelos() {
 }
 
 function TarjetaPosicion({ multiclub }) {
-  const { posicion, red_marca: redMarca, socio_marca: socioMarca, bono } = multiclub;
+  const { posicion, red_marca: redMarca, socios_marca: sociosMarca = [], bono } = multiclub;
 
   return (
     <div className="bg-[#121e36] border border-slate-800 rounded-2xl p-6 space-y-3">
@@ -53,7 +53,7 @@ function TarjetaPosicion({ multiclub }) {
       {redMarca ? (
         <p className="text-sm text-slate-300">
           Formás parte de la red de marca <span className="text-white font-bold">{redMarca}</span>, junto a{' '}
-          <span className="text-white font-bold">{socioMarca}</span>.
+          <span className="text-white font-bold">{sociosMarca.map((s) => s.nombre).join(', ') || 'otros clubes del grupo'}</span>.
         </p>
       ) : posicion ? (
         <p className="text-sm text-slate-300">

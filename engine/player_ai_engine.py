@@ -19,7 +19,7 @@ def _clamp(p: float) -> float:
     return max(PROB_MIN, min(PROB_MAX, p))
 
 
-def disposicion_renovar(overall: int, edad: int, rol: str, moral: int, reputacion_club: int) -> dict:
+def disposicion_renovar(overall: int, edad: int, rol: str, moral: int, reputacion_club: int, relacion_dt: int = 50) -> dict:
     """¿Este jugador está dispuesto a renovar con SU club actual?"""
     probabilidad = 0.75
 
@@ -41,6 +41,9 @@ def disposicion_renovar(overall: int, edad: int, rol: str, moral: int, reputacio
         motivo_dominante = motivo_dominante or "estabilidad"
 
     probabilidad += (moral - 75) * 0.004
+    # Una relación construida con el DT no reemplaza salario ni ambición, pero
+    # pesa lo suficiente para destrabar o enfriar una renovación.
+    probabilidad += (relacion_dt - 50) * 0.003
 
     probabilidad = _clamp(probabilidad)
     quiere = random.random() < probabilidad

@@ -1,3 +1,4 @@
+import PlayerFace from '../components/PlayerFace';
 import React, { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import PlayerDetailModal from '../components/PlayerDetailModal';
@@ -32,6 +33,7 @@ const COLUMNAS_PRIMERA = [
   { key: 'defensa', label: 'Def' },
   { key: 'fisico', label: 'Fís' },
   { key: 'overall', label: 'Ovr' },
+  { key: 'relacion_dt', label: 'DT' },
   { key: 'valor_mercado', label: 'Valor' },
   { key: 'salario', label: 'Salario/sem' },
   { key: 'dias_restantes_contrato', label: 'Contrato' },
@@ -74,6 +76,26 @@ export default function PlantelPage({ plantilla, setPlantilla, API_URL, idEquipo
   const [categoriaActiva, setCategoriaActiva] = useState(PLANTILLAS.includes(categoriaParam) ? categoriaParam : 'PRIMERA');
   const [academia, setAcademia] = useState(null); // {sub13, sub15, sub18, sub21} — se pide una sola vez
   const [cargandoAcademia, setCargandoAcademia] = useState(false);
+  const [cedidos, setCedidos] = useState([]);
+
+  // Un movimiento interno o un fichaje puede haberse cerrado desde otra
+  // pantalla. Al volver al plantel, pedimos el estado real para que el
+  // jugador incorporado aparezca sin obligar a recargar todo el juego.
+  useEffect(() => {
+    if (!idEquipoUsuario) return;
+    fetch(`${API_URL}/equipos/${idEquipoUsuario}/jugadores`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((jugadores) => { if (jugadores) setPlantilla(jugadores); })
+      .catch(() => {});
+  }, [API_URL, idEquipoUsuario, setPlantilla]);
+
+  useEffect(() => {
+    if (!idEquipoUsuario) return;
+    fetch(`${API_URL}/equipos/${idEquipoUsuario}/cedidos`)
+      .then((r) => (r.ok ? r.json() : []))
+      .then(setCedidos)
+      .catch(() => setCedidos([]));
+  }, [API_URL, idEquipoUsuario]);
 
   useEffect(() => {
     if (categoriaActiva === 'PRIMERA' || academia || !idEquipoUsuario) return;
@@ -194,14 +216,21 @@ export default function PlantelPage({ plantilla, setPlantilla, API_URL, idEquipo
     return copia;
   }, [listaActual, sortKey, sortDir]);
 
+  const cedidosRecibidos = useMemo(() => plantilla.filter((j) => j.id_equipo_dueno), [plantilla]);
+
   const columnas = categoriaActiva === 'PRIMERA' ? COLUMNAS_PRIMERA : COLUMNAS_ACADEMIA;
 
   return (
     <div className="bg-[#121e36] border border-slate-800 rounded-2xl p-6 flex flex-col h-full min-h-0 gap-4">
       <div className="flex items-center justify-between shrink-0 flex-wrap gap-3">
-        <h2 className="text-base font-bold text-white">
-          {CATEGORIA_LABEL[categoriaActiva]} ({listaActual.length} Jugadores)
-        </h2>
+        <div>
+          <h2 className="text-base font-bold text-white">
+            {CATEGORIA_LABEL[categoriaActiva]} ({listaActual.length} Jugadores)
+          </h2>
+          {categoriaActiva !== 'PRIMERA' && (
+            <p className="text-[11px] text-slate-400 mt-1">Las incorporaciones de Primera aparecen en la pestaña Primera.</p>
+          )}
+        </div>
         <div className="flex gap-1 bg-[#0b1326] p-1 rounded-xl border border-slate-800">
           {PLANTILLAS.map((cat) => (
             <button
@@ -216,6 +245,32 @@ export default function PlantelPage({ plantilla, setPlantilla, API_URL, idEquipo
           ))}
         </div>
       </div>
+      {categoriaActiva === 'PRIMERA' && cedidos.length > 0 && (
+        <div className="shrink-0 rounded-xl border border-violet-500/30 bg-violet-950/20 p-3">
+          <p className="text-xs font-bold text-violet-200 mb-2">Cedidos en otros clubes ({cedidos.length})</p>
+          <div className="flex flex-wrap gap-2">
+            {cedidos.map((j) => (
+              <button key={j.id_jugador} onClick={() => setJugadorDetalle(j)} className="text-left rounded-lg bg-[#0b1326] border border-slate-800 px-3 py-2 hover:border-violet-400">
+                <span className="block text-xs font-bold text-slate-200">{j.nombre}</span>
+                <span className="block text-[10px] text-slate-400">{j.club_actual} · vuelve {j.fin_cesion || 'sin fecha'}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+      {categoriaActiva === 'PRIMERA' && cedidosRecibidos.length > 0 && (
+        <div className="shrink-0 rounded-xl border border-sky-500/30 bg-sky-950/20 p-3">
+          <p className="text-xs font-bold text-sky-200 mb-2">Préstamos recibidos ({cedidosRecibidos.length})</p>
+          <div className="flex flex-wrap gap-2">
+            {cedidosRecibidos.map((j) => (
+              <button key={j.id_jugador} onClick={() => setJugadorDetalle(j)} className="text-left rounded-lg bg-[#0b1326] border border-slate-800 px-3 py-2 hover:border-sky-400">
+                <span className="block text-xs font-bold text-slate-200">{j.nombre}</span>
+                <span className="block text-[10px] text-slate-400">desde {j.club_dueno || 'su club de origen'} · hasta {j.fin_cesion || 'sin fecha'}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
       {error && (
         <div className="bg-rose-950/60 border border-rose-500/40 text-rose-300 rounded-xl p-3 text-xs flex items-center justify-between gap-3 shrink-0">
           <span>{error}</span>
@@ -264,10 +319,18 @@ export default function PlantelPage({ plantilla, setPlantilla, API_URL, idEquipo
                   </td>
                 )}
                 <td className="p-3 font-bold text-slate-200 whitespace-nowrap">
-                  {j.nombre}
+                  <PlayerFace player={j} API_URL={API_URL} className="fm-list-face mr-2 align-middle" />{j.nombre}
                   {j.en_transferible && (
                     <span title="En lista de transferibles" className="ml-1.5 text-[9px] font-bold px-1.5 py-0.5 rounded bg-amber-400 text-slate-950 align-middle">
                       LISTA
+                    </span>
+                  )}
+                  {j.id_equipo_dueno && (
+                    <span title={`Cedido desde ${j.club_dueno || 'otro club'}`} className="ml-1.5 text-[9px] font-bold px-1.5 py-0.5 rounded bg-sky-500/80 text-slate-950 align-middle">CEDIDO</span>
+                  )}
+                  {j.en_convocatoria && (
+                    <span title="Convocado con su selección: no está disponible para el club" className="ml-1.5 text-[9px] font-bold px-1.5 py-0.5 rounded bg-violet-500/80 text-white align-middle">
+                      SELECCIÓN
                     </span>
                   )}
                 </td>
@@ -348,6 +411,7 @@ export default function PlantelPage({ plantilla, setPlantilla, API_URL, idEquipo
         onHablar={jugadorDetalle ? () => { setJugadorADialogar(jugadorDetalle); setJugadorDetalle(null); } : undefined}
       />
       <DialogoJugadorModal
+        onActualizado={(data) => setPlantilla((prev) => prev.map((p) => p.id_jugador === jugadorADialogar?.id_jugador ? { ...p, moral: data.moral, relacion_dt: data.relacion_dt } : p))}
         jugador={jugadorADialogar}
         open={!!jugadorADialogar}
         onClose={() => setJugadorADialogar(null)}

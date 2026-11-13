@@ -1,4 +1,6 @@
+import PlayerFace from '../components/PlayerFace';
 import React, { useEffect, useMemo, useState } from 'react';
+import Modal from '../components/Modal';
 import PlayerDetailModal from '../components/PlayerDetailModal';
 import { setRolJugador, setDutyJugador } from '../utils/roles';
 import { FORMACIONES_SLOTS, FORMACIONES_LABEL } from '../utils/formaciones';
@@ -41,10 +43,25 @@ function calcularAlineacion(plantilla, slots, asignacionManual) {
     }
   });
 
+  // Una ubicación manual fuera de su posición natural puede dejar a otro
+  // titular sin categoría disponible (por ejemplo, un MED en el lugar de un
+  // DEL). Completar los huecos con los titulares aún no usados garantiza
+  // siempre once jugadores en la cancha y los marca como fuera de posición.
+  const restantes = plantilla
+    .filter((j) => j.rol === 'TITULAR' && !usados.has(j.id_jugador))
+    .sort((a, b) => b.overall - a.overall);
+  let siguiente = 0;
+  resultado.forEach((val, i) => {
+    if (val || siguiente >= restantes.length) return;
+    resultado[i] = restantes[siguiente];
+    usados.add(restantes[siguiente].id_jugador);
+    siguiente += 1;
+  });
+
   return resultado;
 }
 
-function PanelBanca({ titulo, jugadores, rolDestino, vacio, panelSobrevolado, onDragOverPanel, onDragLeavePanel, onDropPanel, onVerFicha, horizontal, bare, jugadorSeleccionado, onToggleSeleccion, onColocarAqui }) {
+function PanelBanca({ titulo, jugadores, rolDestino, vacio, panelSobrevolado, onDragOverPanel, onDragLeavePanel, onDropPanel, onVerFicha, horizontal, downward, bare, jugadorSeleccionado, onToggleSeleccion, onColocarAqui }) {
   const modoColocar = jugadorSeleccionado != null;
   return (
     <div
@@ -65,7 +82,7 @@ function PanelBanca({ titulo, jugadores, rolDestino, vacio, panelSobrevolado, on
       }`}
     >
       <h4 className="text-xs font-bold text-slate-300 uppercase shrink-0 mb-2">{titulo} ({jugadores.length})</h4>
-      <div className={horizontal ? 'flex flex-row gap-2 overflow-x-auto scroll-slide pb-1' : 'space-y-2 overflow-y-auto scroll-slide min-h-0 flex-1 pr-1 max-h-56'}>
+      <div className={horizontal ? 'flex flex-row gap-2 overflow-x-auto scroll-slide pb-1' : downward ? 'grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2' : 'space-y-2 overflow-y-auto scroll-slide min-h-0 flex-1 pr-1 max-h-56'}>
         {jugadores.map((j) => {
           const seleccionado = jugadorSeleccionado === j.id_jugador;
           return (
@@ -73,12 +90,12 @@ function PanelBanca({ titulo, jugadores, rolDestino, vacio, panelSobrevolado, on
             key={j.id_jugador}
             draggable
             onDragStart={(e) => { e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', String(j.id_jugador)); }}
-            onClick={(e) => { e.stopPropagation(); if (modoColocar) onColocarAqui(rolDestino); else onVerFicha(j); }}
+            onClick={(e) => { e.stopPropagation(); if (modoColocar) onColocarAqui(rolDestino); else onToggleSeleccion(j.id_jugador); }}
             className={`p-2 rounded-xl border bg-[#0b1326] hover:border-sky-500/50 cursor-grab active:cursor-grabbing text-xs flex justify-between items-center transition gap-2 ${
               seleccionado ? 'border-sky-400 ring-1 ring-sky-400' : 'border-slate-800'
             } ${horizontal ? 'shrink-0 w-40' : ''}`}
           >
-            <div className="flex-1 min-w-0">
+            <PlayerFace player={j} className="fm-list-face" /><div className="flex-1 min-w-0">
               <p className="font-bold text-slate-200 truncate">{j.nombre}</p>
               <p className="text-[10px] text-slate-400">Ovr {j.overall}</p>
             </div>
@@ -112,7 +129,7 @@ function BancoSuplentes({ slots, slotSobrevolado, onDragOverSlot, onDragLeaveSlo
   return (
     <div className={bare ? 'shrink-0' : `bg-[#121e36] border border-slate-800 rounded-2xl p-4 ${vertical ? 'h-full flex flex-col min-h-0' : ''}`}>
       <h4 className="text-xs font-bold text-slate-300 uppercase mb-2 shrink-0">Banco de Suplentes ({ocupados}/{BANCO_SIZE})</h4>
-      <div className={vertical ? 'grid grid-cols-2 gap-2 overflow-y-auto scroll-slide min-h-0' : 'grid grid-cols-3 sm:grid-cols-9 gap-2'}>
+      <div className={vertical ? 'flex flex-col gap-1 overflow-y-auto scroll-slide min-h-0' : 'grid grid-cols-3 sm:grid-cols-9 gap-2'}>
         {slots.map((j, i) => {
           const seleccionado = !!j && jugadorSeleccionado === j.id_jugador;
           return (
@@ -123,17 +140,17 @@ function BancoSuplentes({ slots, slotSobrevolado, onDragOverSlot, onDragLeaveSlo
             onDragOver={(e) => { e.preventDefault(); onDragOverSlot(i); }}
             onDragLeave={() => onDragLeaveSlot(i)}
             onDrop={(e) => onDropSlot(e, i)}
-            onClick={() => { if (modoColocar) onColocarEn(i); else if (j) onVerFicha(j); }}
-            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); if (modoColocar) onColocarEn(i); else if (j) onVerFicha(j); } }}
+            onClick={() => { if (modoColocar) onColocarEn(i); else if (j) onToggleSeleccion(j.id_jugador); }}
+            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); if (modoColocar) onColocarEn(i); else if (j) onToggleSeleccion(j.id_jugador); } }}
             role="button"
             tabIndex={0}
-            aria-label={j ? `${j.nombre}, ${j.posicion_especifica || j.posicion}, overall ${j.overall}${modoColocar ? ' — click para ubicar acá' : ''}` : `Lugar ${i + 1} del banco, vacío${modoColocar ? ' — click para ubicar acá' : ''}`}
+            aria-label={j ? `${j.nombre}, ${j.posicion_especifica || j.posicion}, overall ${j.overall}${modoColocar ? ' — click para ubicar acá' : ' — click para seleccionar y mover'}` : `Lugar ${i + 1} del banco, vacío${modoColocar ? ' — click para ubicar acá' : ''}`}
             className={`h-16 rounded-xl border p-1.5 flex items-center justify-center text-center transition focus-visible:outline focus-visible:outline-sky-500 ${
               j ? 'bg-[#0b1326] cursor-grab active:cursor-grabbing' : 'border-dashed cursor-pointer'
             } ${seleccionado ? 'ring-1 ring-sky-400' : ''} ${slotSobrevolado === i || (modoColocar && !seleccionado) ? 'border-sky-400 scale-105' : 'border-slate-800'}`}
           >
             {j ? (
-              <div className="min-w-0 flex items-center gap-1">
+              <div className="min-w-0 flex items-center gap-2"><PlayerFace player={j} className="fm-list-face" />
                 <div className="min-w-0">
                   <p className="text-xs font-bold text-slate-200 truncate">{j.nombre}</p>
                   <p className="text-[10px] text-slate-400">{j.posicion_especifica || j.posicion} · Ovr {j.overall}</p>
@@ -169,6 +186,7 @@ export default function TacticasPage({ plantilla, setPlantilla, API_URL, idEquip
   const [guardando, setGuardando] = useState(false);
   const [mensajeGuardado, setMensajeGuardado] = useState(null);
   const [jugadorDetalle, setJugadorDetalle] = useState(null);
+  const [jugadorTactica, setJugadorTactica] = useState(null);
   const [slotSobrevolado, setSlotSobrevolado] = useState(null);
   const [panelSobrevolado, setPanelSobrevolado] = useState(null); // 'suplentes' | 'reserva' | null
   const [asignacionManual, setAsignacionManual] = useState({});
@@ -434,9 +452,9 @@ export default function TacticasPage({ plantilla, setPlantilla, API_URL, idEquip
   }
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-4 gap-6 h-full min-h-0">
-      <div className="bg-[#121e36] border border-slate-800 rounded-2xl p-5 space-y-4 h-fit">
-        <h3 className="text-xs font-bold text-sky-400 uppercase">Estrategia y Controles</h3>
+    <div className="fm-tactics">
+      <div className="fm-tactics-controls space-y-4">
+        <h2 className="text-lg font-bold text-white">Tácticas</h2>
         <div>
           <label htmlFor="tacticas-formacion" className="text-xs text-slate-400 block mb-1">Formación</label>
           <select id="tacticas-formacion" value={formacion} onChange={(e) => setFormacion(e.target.value)} className="w-full bg-[#0b1326] border border-slate-700 p-2.5 rounded-xl text-xs text-white">
@@ -475,14 +493,14 @@ export default function TacticasPage({ plantilla, setPlantilla, API_URL, idEquip
         <p className="text-[11px] text-slate-400 pt-2 border-t border-slate-800">
           Arrastrá un jugador de los paneles a la cancha para hacerlo titular, o de la cancha a los paneles de suplentes o reserva para sacarlo. Vos elegís a quién reemplaza. Si lo ponés en una posición que no es la suya, la posición se marca en amarillo.
           <br /><br />
-          Sin mouse: tocá <span className="text-sky-400 font-bold">⇄</span> en un jugador para levantarlo y después click (o Enter) en el destino. Escape cancela.
+          Para cambiar jugadores: hacé click en un suplente o reserva para seleccionarlo y después click (o Enter) en su lugar de la cancha. Escape cancela.
           <br /><br />
-          Debajo de cada titular: <span className="text-sky-400 font-bold">D</span>efensivo / <span className="text-slate-300 font-bold">E</span>quilibrado / <span className="text-emerald-400 font-bold">O</span>fensivo — cuánto pesa ese jugador en ataque o en defensa durante el partido.
+          Hacé click en un titular de la cancha para ajustar su instrucción individual de ataque y defensa.
         </p>
       </div>
 
-      <div className="lg:col-span-2 flex flex-col min-h-0 gap-6">
-        <div className="bg-[#0b1326] border border-slate-800 rounded-2xl p-4 relative overflow-hidden min-h-[300px] max-h-[360px] w-full">
+      <div className="fm-tactics-field">
+        <div className="fm-pitch">
           <div className="absolute inset-3 border-2 border-emerald-800/40 rounded-lg" />
           <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-1/3 aspect-square rounded-full border-2 border-emerald-800/40" />
 
@@ -502,7 +520,7 @@ export default function TacticasPage({ plantilla, setPlantilla, API_URL, idEquip
                 role={!j ? 'button' : undefined}
                 tabIndex={!j ? 0 : undefined}
                 aria-label={!j ? `Lugar vacío en cancha (${slot.posEspecifica || slot.pos})${modoColocar ? ' — click para ubicar acá' : ''}` : undefined}
-                style={{ left: `${slot.x}%`, top: `${slot.y}%` }}
+                style={{ left: `${slot.x}%`, top: `${Math.min(88, Math.max(12, 100 - slot.y))}%` }}
                 className={`absolute -translate-x-1/2 -translate-y-1/2 flex flex-col items-center transition focus-visible:outline focus-visible:outline-sky-500 ${
                   slotSobrevolado === i ? 'scale-110' : ''
                 }`}
@@ -512,7 +530,7 @@ export default function TacticasPage({ plantilla, setPlantilla, API_URL, idEquip
                     <div
                       draggable
                       onDragStart={(e) => { e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', String(j.id_jugador)); }}
-                      onClick={() => { if (modoColocar) colocarSeleccionadoEn('slot', i); else setJugadorDetalle(j); }}
+                      onClick={() => { if (modoColocar) colocarSeleccionadoEn('slot', i); else setJugadorTactica(j); }}
                       className="cursor-grab active:cursor-grabbing flex flex-col items-center gap-0.5"
                       title={
                         fueraDePosicion
@@ -520,10 +538,11 @@ export default function TacticasPage({ plantilla, setPlantilla, API_URL, idEquip
                           : `${j.nombre} — natural: ${j.posicion_especifica || j.posicion}`
                       }
                     >
-                      <span className={`px-2 py-0.5 rounded-full text-[10px] font-black shadow-lg border bg-[#121e36] text-white whitespace-nowrap ${
+                      <PlayerFace player={j} API_URL={API_URL} className="fm-pitch-face" />
+                      <span className={`fm-pitch-name px-2 py-0.5 rounded-full text-[10px] font-black shadow-lg border bg-[#121e36] text-white whitespace-nowrap ${
                         seleccionado ? 'ring-1 ring-sky-400' : ''
                       } ${fueraDePosicion ? 'border-amber-400' : 'border-sky-400'}`}>
-                        {iniciales(j.nombre)}
+                        {j.nombre.split(' ').slice(-2).join(' ')}
                       </span>
                       <span className="text-[9px] text-sky-300 font-bold bg-[#121e36]/80 px-1 rounded">{j.overall}</span>
                       <span className={`text-[8px] font-black px-1.5 py-px rounded-full ${
@@ -532,25 +551,7 @@ export default function TacticasPage({ plantilla, setPlantilla, API_URL, idEquip
                         {slot.posEspecifica || slot.pos}
                       </span>
                     </div>
-                    <div className="flex gap-0.5 mt-0.5 items-center">
-                      {[['DEFENSIVO', 'D'], ['EQUILIBRADO', 'E'], ['OFENSIVO', 'O']].map(([valor, letra]) => (
-                        <button
-                          key={valor}
-                          onClick={() => cambiarDuty(j, valor)}
-                          title={`Instrucción: ${valor.charAt(0)}${valor.slice(1).toLowerCase()}`}
-                          className={`w-3.5 h-3.5 rounded-sm text-[7px] font-black leading-none flex items-center justify-center border transition ${
-                            (j.duty || 'EQUILIBRADO') === valor
-                              ? valor === 'OFENSIVO'
-                                ? 'bg-emerald-500 border-emerald-400 text-slate-950'
-                                : valor === 'DEFENSIVO'
-                                  ? 'bg-sky-500 border-sky-400 text-slate-950'
-                                  : 'bg-slate-500 border-slate-400 text-white'
-                              : 'bg-[#121e36] border-slate-700 text-slate-400 hover:border-slate-500'
-                          }`}
-                        >
-                          {letra}
-                        </button>
-                      ))}
+                    <div className="flex mt-0.5 items-center">
                       <button
                         onClick={(e) => { e.stopPropagation(); toggleSeleccion(j.id_jugador); }}
                         aria-label={seleccionado ? `Cancelar mover a ${j.nombre}` : `Mover a ${j.nombre}`}
@@ -578,21 +579,9 @@ export default function TacticasPage({ plantilla, setPlantilla, API_URL, idEquip
           })}
         </div>
 
-        <PanelBanca
-          titulo="Reserva" jugadores={reserva} rolDestino="RESERVA" vacio="No hay jugadores en reserva."
-          panelSobrevolado={panelSobrevolado}
-          onDragOverPanel={setPanelSobrevolado}
-          onDragLeavePanel={(rol) => setPanelSobrevolado((s) => (s === rol ? null : s))}
-          onDropPanel={soltarEnPanel}
-          onVerFicha={setJugadorDetalle}
-          jugadorSeleccionado={jugadorSeleccionado}
-          onToggleSeleccion={toggleSeleccion}
-          onColocarAqui={(rol) => colocarSeleccionadoEn('panel', rol)}
-          horizontal
-        />
       </div>
 
-      <div className="lg:col-span-1 min-h-0">
+      <div className="fm-tactics-roster min-h-0">
         <BancoSuplentes
           slots={bancoSlots}
           slotSobrevolado={slotBancoSobrevolado}
@@ -607,7 +596,55 @@ export default function TacticasPage({ plantilla, setPlantilla, API_URL, idEquip
         />
       </div>
 
+      <div className="fm-tactics-reserves">
+        <PanelBanca
+          titulo="Reserva" jugadores={reserva} rolDestino="RESERVA" vacio="No hay jugadores en reserva."
+          panelSobrevolado={panelSobrevolado}
+          onDragOverPanel={setPanelSobrevolado}
+          onDragLeavePanel={(rol) => setPanelSobrevolado((s) => (s === rol ? null : s))}
+          onDropPanel={soltarEnPanel}
+          onVerFicha={setJugadorDetalle}
+          jugadorSeleccionado={jugadorSeleccionado}
+          onToggleSeleccion={toggleSeleccion}
+          onColocarAqui={(rol) => colocarSeleccionadoEn('panel', rol)}
+          downward
+        />
+      </div>
+
       <PlayerDetailModal jugador={jugadorDetalle} open={!!jugadorDetalle} onClose={() => setJugadorDetalle(null)} API_URL={API_URL} />
+      <Modal open={!!jugadorTactica} onClose={() => setJugadorTactica(null)} size="sm" labelledBy="ajuste-tactico-titulo">
+        {jugadorTactica && (
+          <div className="p-5 space-y-5">
+            <div className="flex items-center gap-3">
+              <PlayerFace player={jugadorTactica} API_URL={API_URL} className="w-14 h-16" />
+              <div>
+                <h3 id="ajuste-tactico-titulo" className="font-bold text-white">{jugadorTactica.nombre}</h3>
+                <p className="text-xs text-slate-400">Instrucción individual</p>
+              </div>
+            </div>
+            <p className="text-sm text-slate-300">Definí cuánto participa en ataque o prioriza la defensa.</p>
+            <div className="grid gap-2">
+              {[
+                ['DEFENSIVO', 'Defensivo', 'Prioriza la recuperación y la cobertura.', 'border-sky-500 text-sky-200'],
+                ['EQUILIBRADO', 'Equilibrado', 'Mantiene su rol natural en ambas fases.', 'border-slate-500 text-slate-100'],
+                ['OFENSIVO', 'Ofensivo', 'Se proyecta más durante los ataques.', 'border-emerald-500 text-emerald-200'],
+              ].map(([valor, titulo, descripcion, color]) => (
+                <button
+                  key={valor}
+                  onClick={() => { cambiarDuty(jugadorTactica, valor); setJugadorTactica(null); }}
+                  className={`rounded-xl border p-3 text-left transition hover:bg-slate-800 ${
+                    (jugadorTactica.duty || 'EQUILIBRADO') === valor ? `${color} bg-slate-800` : 'border-slate-700 text-slate-300'
+                  }`}
+                >
+                  <span className="block font-bold text-sm">{titulo}</span>
+                  <span className="block text-xs text-slate-400 mt-1">{descripcion}</span>
+                </button>
+              ))}
+            </div>
+            <button onClick={() => setJugadorTactica(null)} className="w-full rounded-xl border border-slate-700 py-2 text-sm text-slate-300 hover:bg-slate-800">Cancelar</button>
+          </div>
+        )}
+      </Modal>
     </div>
   );
 }

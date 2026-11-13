@@ -513,10 +513,15 @@ def gen_player_real(datos: dict) -> dict:
     attrs = derivar_attrs_desde_4(
         int(datos["ataque"]), int(datos["defensa"]), int(datos["pase"]), int(datos["fisico"]), pos,
     )
+    if datos.get('calibracion_ovr', {}).get('metodo') in ('rating_proveedor', 'mercado_comparables'):
+        from pack_ratings import atributos_calibrados
+        attrs = atributos_calibrados(datos)
     edad = int(datos["edad"])
     overall = _overall({**attrs, "posicion": pos})
     potencial = _generar_potencial(overall, edad)
     valor_mercado = _valor_mercado_real(overall, edad, potencial)
+    from pack_market import valor_importado
+    valor_mercado, _ = valor_importado(datos, valor_mercado)
     return {
         "nombre": datos["nombre"],
         "posicion": pos,

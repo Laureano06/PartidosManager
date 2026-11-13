@@ -1,3 +1,4 @@
+import PlayerFace from './PlayerFace';
 import React, { useEffect, useState } from 'react';
 import Modal from './Modal';
 import MoneyInput from './MoneyInput';
@@ -20,6 +21,9 @@ const ETIQUETA_ESTADO = {
 // Fichajes, etc.) — solo necesita el jugador y el equipo comprador.
 export default function NegociacionFichajeModal({ jugador, open, onClose, API_URL, idEquipoUsuario, onResuelto }) {
   const [ofertaMonto, setOfertaMonto] = useState('');
+  const [anios, setAnios] = useState(3);
+  const [clausula, setClausula] = useState('');
+  const [historial, setHistorial] = useState([]);
   const [salarioOfrecido, setSalarioOfrecido] = useState('');
   const [procesando, setProcesando] = useState(false);
   const [respuesta, setRespuesta] = useState(null);
@@ -38,6 +42,7 @@ export default function NegociacionFichajeModal({ jugador, open, onClose, API_UR
     setOfertaMonto(String(jugador.valor_mercado));
     setSalarioOfrecido(String(Math.round((jugador.salario || 1000) * 1.1)));
     setRespuesta(null);
+    setAnios(3); setClausula(''); setHistorial([]);
     setRonda(0);
     setFase('precio');
     setMontoAcordado(null);
@@ -45,6 +50,15 @@ export default function NegociacionFichajeModal({ jugador, open, onClose, API_UR
     setAddonPartidos('');
     setAddonMonto('');
   }, [jugador]);
+
+  useEffect(() => {
+    if (!open || !jugador?.id_jugador || !idEquipoUsuario) return;
+    const controller = new AbortController();
+    fetch(`${API_URL}/fichajes/historial/${jugador.id_jugador}?id_equipo=${idEquipoUsuario}`, { signal: controller.signal })
+      .then((r) => { if (!r.ok) throw new Error('No se pudo cargar el historial'); return r.json(); })
+      .then(setHistorial).catch((e) => { if (e.name !== 'AbortError') console.error(e); });
+    return () => controller.abort();
+  }, [open, jugador?.id_jugador, idEquipoUsuario, API_URL]);
 
   const agregarAddon = () => {
     const partidos = Number(addonPartidos);
@@ -70,6 +84,8 @@ export default function NegociacionFichajeModal({ jugador, open, onClose, API_UR
         body: JSON.stringify({ id_jugador: jugador.id_jugador, id_equipo_comprador: idEquipoUsuario, monto_oferta: monto, ronda }),
       });
       const data = await res.json();
+      if (!res.ok) throw new Error(typeof data.detail === 'string' ? data.detail : 'Revisá las condiciones de la oferta.');
+      setHistorial((prev) => [...prev, { fase, monto: Number(montoOverride ?? ofertaMonto), estado: data.estado, mensaje: data.mensaje || 'El club acepta el precio.' }]);
       setOfertaMonto(String(monto));
       if (data.estado === 'ACEPTADA_CLUB') {
         setMontoAcordado(data.monto_acordado);
@@ -82,7 +98,7 @@ export default function NegociacionFichajeModal({ jugador, open, onClose, API_UR
       }
     } catch (error) {
       console.error('Error procesando oferta en la API:', error);
-      setRespuesta({ estado: 'ERROR', mensaje: 'No se pudo conectar con el servidor.' });
+      setRespuesta({ estado: 'ERROR', mensaje: error.message || 'No se pudo conectar con el servidor.' });
     } finally {
       setProcesando(false);
     }
@@ -97,17 +113,19 @@ export default function NegociacionFichajeModal({ jugador, open, onClose, API_UR
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          id_jugador: jugador.id_jugador, id_equipo_comprador: idEquipoUsuario,
+          id_jugador: jugador.id_jugador, id_equipo_comprador: idEquipoUsuario, anios: Number(anios), clausula_rescision: clausula ? Number(clausula) : null,
           monto_oferta: montoAcordado, salario_ofrecido: salario, ronda, addons,
         }),
       });
       const data = await res.json();
+      if (!res.ok) throw new Error(typeof data.detail === 'string' ? data.detail : 'Revisá las condiciones del contrato.');
+      setHistorial((prev) => [...prev, { fase: 'contrato', monto: salario, estado: data.estado, mensaje: data.mensaje || 'Respuesta del representante' }]);
       setRespuesta(data);
       setSalarioOfrecido(String(salario));
       if (data.estado === 'ACEPTADA') { if (onResuelto) onResuelto(); } else { setRonda((r) => r + 1); }
     } catch (error) {
       console.error('Error negociando el contrato:', error);
-      setRespuesta({ estado: 'ERROR', mensaje: 'No se pudo conectar con el servidor.' });
+      setRespuesta({ estado: 'ERROR', mensaje: error.message || 'No se pudo conectar con el servidor.' });
     } finally {
       setProcesando(false);
     }
@@ -121,7 +139,12 @@ export default function NegociacionFichajeModal({ jugador, open, onClose, API_UR
 
   return (
     <Modal open={open} onClose={onClose} labelledBy="negociacion-modal-title">
-      <div className="p-8 sm:p-12 max-w-xl mx-auto space-y-6">
+      <div className="fm-negotiation">
+        <header className="flex items-center gap-5"><PlayerFace player={jugador} API_URL={API_URL} className="editor-face" /><div><h2 className="text-2xl font-bold">Negociación de fichaje</h2><p className="text-slate-400">{jugador.nombre} · {fase === 'precio' ? 'Acuerdo con el club' : 'Contrato del jugador'}</p></div></header>
+        <aside className="fm-negotiation-log"><h4>Historial de la negociación</h4>
+          {!historial.length && <p className="text-slate-400">Todavía no enviaste una oferta.</p>}
+          <ol>{historial.map((h, i) => <li key={i}><p className="font-bold">{h.fase === 'precio' ? 'Precio del pase' : 'Salario semanal'} · ${h.monto.toLocaleString('es-AR')}</p><p className="text-slate-300 mt-2">{h.mensaje}</p><small>{h.estado}</small></li>)}</ol>
+        </aside>
         <div>
           <h3 id="negociacion-modal-title" className="text-2xl font-bold text-white">
             {fase === 'precio' ? `Acordar precio por ${jugador.nombre}` : `Contrato con ${jugador.nombre}`}
@@ -202,6 +225,10 @@ export default function NegociacionFichajeModal({ jugador, open, onClose, API_UR
           ) : (
             <div className="space-y-4 text-sm">
               <p className="text-slate-300">Salario actual del jugador: ${jugador.salario?.toLocaleString('es-AR') || '?'}/semana</p>
+              <div className="grid grid-cols-2 gap-4">
+                <label>Duración (años)<select aria-label="Duración del contrato" value={anios} onChange={(e) => setAnios(e.target.value)} className="block w-full bg-slate-800 p-3 mt-2">{[1,2,3,4,5].map((n) => <option key={n}>{n}</option>)}</select></label>
+                <label>Cláusula de rescisión (opcional)<MoneyInput value={clausula} onChange={setClausula} className="block w-full bg-slate-800 p-3 mt-2" /></label>
+              </div>
               <label htmlFor="negociacion-salario" className="text-xs text-slate-400 block mb-1">Salario semanal ofrecido</label>
               <MoneyInput id="negociacion-salario" value={salarioOfrecido} onChange={setSalarioOfrecido} className="w-full bg-[#0b1326] border border-slate-700 p-3 rounded-xl text-white" />
               <button

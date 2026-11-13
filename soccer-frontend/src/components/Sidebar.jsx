@@ -3,6 +3,7 @@ import { NavLink } from 'react-router-dom';
 
 function EscudoClub({ nombreClub, escudoUrl }) {
   const [fallo, setFallo] = useState(false);
+  useEffect(() => setFallo(false), [escudoUrl]);
   const inicial = (nombreClub || '?').replace(/^.*-\s*/, '').trim().charAt(0).toUpperCase() || '?';
 
   if (escudoUrl && !fallo) {
@@ -33,6 +34,7 @@ const SECCIONES_MENU = [
       { path: '/panel', label: 'Panel de Control' },
       { path: '/calendario', label: 'Calendario' },
       { path: '/multiclub', label: 'Multiclub' },
+      { path: '/selecciones', label: 'Selecciones' },
       { path: '/directiva', label: 'Directiva' },
     ],
   },
@@ -159,7 +161,7 @@ export default function Sidebar({ presupuesto, nombreClub, escudoUrl, confianzaD
   }, [menuMovilAbierto]);
 
   const contenidoProps = {
-    nombreClub, escudoUrl, afiliadosPipeline, clubActivo, idEquipoUsuario, setClubActivo,
+    nombreClub, escudoUrl: escudoUrl?.startsWith('/static/') ? `${API_URL}${escudoUrl}` : escudoUrl, afiliadosPipeline, clubActivo, idEquipoUsuario, setClubActivo,
     presupuesto, confianzaDirectiva, cambiarDeCarrera, volverAlInicio,
   };
 

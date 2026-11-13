@@ -86,7 +86,7 @@ function TablaJugadores({ jugadores, vacio, onSubirAPrimera, onVerJugador, mostr
   );
 }
 
-function TablaCedidos({ jugadores }) {
+function TablaCedidos({ jugadores, tipo = 'salida' }) {
   if (jugadores.length === 0) {
     return <p className="text-xs text-slate-400">No tenés jugadores cedidos a préstamo en este momento.</p>;
   }
@@ -98,7 +98,7 @@ function TablaCedidos({ jugadores }) {
           <th className="p-2">Jugador</th>
           <th className="p-2">Pos</th>
           <th className="p-2">Ovr</th>
-          <th className="p-2">A préstamo en</th>
+          <th className="p-2">{tipo === 'salida' ? 'A préstamo en' : 'Cedido desde'}</th>
           <th className="p-2">Vuelve el</th>
           <th className="p-2">Opción de compra</th>
         </tr>
@@ -109,7 +109,7 @@ function TablaCedidos({ jugadores }) {
             <td className="p-2 font-bold text-slate-200">{j.nombre}</td>
             <td className="p-2 text-sky-400" title={j.posicion}>{j.posicion_especifica || j.posicion}</td>
             <td className="p-2 font-bold text-white">{j.overall}</td>
-            <td className="p-2 text-slate-300">{j.club_prestamista}</td>
+            <td className="p-2 text-slate-300">{tipo === 'salida' ? j.club_prestamista : j.club_dueno}</td>
             <td className="p-2 text-slate-400">{j.fin_cesion ? new Date(`${j.fin_cesion}T00:00:00`).toLocaleDateString('es-AR') : '—'}</td>
             <td className="p-2 text-amber-300">{j.opcion_compra ? `$${j.opcion_compra.toLocaleString('es-AR')}` : 'Sin opción'}</td>
           </tr>
@@ -223,6 +223,12 @@ export default function DesarrolloPage({ API_URL, idEquipoUsuario }) {
         <h2 className="text-sm font-bold text-white mb-1">Cesiones activas</h2>
         <p className="text-[11px] text-slate-400 mb-4">Jugadores tuyos jugando a préstamo en otro club.</p>
         <TablaCedidos jugadores={datos.cedidos} />
+      </div>
+
+      <div className="bg-[#121e36] border border-slate-800 rounded-2xl p-6">
+        <h2 className="text-sm font-bold text-white mb-1">Préstamos recibidos</h2>
+        <p className="text-[11px] text-slate-400 mb-4">Jugadores de otro club que están disponibles en tu plantel mientras dure su cesión.</p>
+        <TablaCedidos jugadores={datos.cedidos_recibidos || []} tipo="entrada" />
       </div>
 
       <div className="bg-[#121e36] border border-slate-800 rounded-2xl p-6">

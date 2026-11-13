@@ -205,7 +205,7 @@ export default function TransferenciasPage({ API_URL, idEquipoUsuario, idPartida
   const ordenClub = useOrdenTabla(jugadoresClubFiltrados);
 
   // --- método 2: buscador (nombre y/o métricas) en toda la liga/mercado ---
-  const [filtros, setFiltros] = useState({ nombre: '', club: '', categoria: '', posicion: '', posicionEspecifica: '', edadMin: '', edadMax: '', overallMin: '', orden: 'valor', soloLibres: false });
+  const [filtros, setFiltros] = useState({ nombre: '', club: '', categoria: '', posicion: '', posicionEspecifica: '', edadMin: '', edadMax: '', overallMin: '', orden: 'valor', soloLibres: false, soloTransferibles: false, soloCedibles: false });
   const [jugadorAReclutar, setJugadorAReclutar] = useState(null);
   const [resultadosBusqueda, setResultadosBusqueda] = useState([]);
   const [totalBusqueda, setTotalBusqueda] = useState(0);
@@ -265,6 +265,8 @@ export default function TransferenciasPage({ API_URL, idEquipoUsuario, idPartida
     if (filtros.edadMax) params.set('edad_max', filtros.edadMax);
     if (filtros.overallMin) params.set('overall_min', filtros.overallMin);
     if (filtros.soloLibres) params.set('solo_libres', 'true');
+    if (filtros.soloTransferibles) params.set('solo_transferibles', 'true');
+    if (filtros.soloCedibles) params.set('solo_cedibles', 'true');
     params.set('orden', filtros.orden);
     if (idPartida) params.set('id_partida', idPartida);
     fetch(`${API_URL}/mercado/jugadores?${params.toString()}`)
@@ -662,10 +664,28 @@ export default function TransferenciasPage({ API_URL, idEquipoUsuario, idPartida
               <input
                 type="checkbox"
                 checked={filtros.soloLibres}
-                onChange={(e) => setFiltros((f) => ({ ...f, soloLibres: e.target.checked }))}
+                onChange={(e) => setFiltros((f) => ({ ...f, soloLibres: e.target.checked, soloTransferibles: e.target.checked ? false : f.soloTransferibles, soloCedibles: e.target.checked ? false : f.soloCedibles }))}
                 className="accent-sky-500"
               />
               Solo agentes libres
+            </label>
+            <label className="flex items-center gap-2 text-xs text-slate-300 pb-2">
+              <input
+                type="checkbox"
+                checked={filtros.soloTransferibles}
+                onChange={(e) => setFiltros((f) => ({ ...f, soloTransferibles: e.target.checked, soloLibres: e.target.checked ? false : f.soloLibres, soloCedibles: e.target.checked ? false : f.soloCedibles }))}
+                className="accent-sky-500"
+              />
+              Solo transferibles
+            </label>
+            <label className="flex items-center gap-2 text-xs text-slate-300 pb-2">
+              <input
+                type="checkbox"
+                checked={filtros.soloCedibles}
+                onChange={(e) => setFiltros((f) => ({ ...f, soloCedibles: e.target.checked, soloLibres: e.target.checked ? false : f.soloLibres, soloTransferibles: e.target.checked ? false : f.soloTransferibles }))}
+                className="accent-sky-500"
+              />
+              Disponibles para préstamo
             </label>
             <button onClick={buscarJugadores} className="bg-sky-500 hover:bg-sky-400 text-slate-950 font-bold px-4 py-2 rounded-xl text-xs">
               Aplicar filtros
@@ -693,6 +713,7 @@ export default function TransferenciasPage({ API_URL, idEquipoUsuario, idPartida
                     <ThOrdenable label="Edad" colKey="edad" sortKey={ordenBusqueda.sortKey} sortDir={ordenBusqueda.sortDir} onClick={ordenBusqueda.clickHeader} />
                     <ThOrdenable label="Ovr" colKey="overall" sortKey={ordenBusqueda.sortKey} sortDir={ordenBusqueda.sortDir} onClick={ordenBusqueda.clickHeader} />
                     <ThOrdenable label="Valor" colKey="valor_mercado" sortKey={ordenBusqueda.sortKey} sortDir={ordenBusqueda.sortDir} onClick={ordenBusqueda.clickHeader} />
+                    <th className="p-3">Disponible</th>
                     <ThOrdenable label="Contrato" colKey="dias_restantes_contrato" sortKey={ordenBusqueda.sortKey} sortDir={ordenBusqueda.sortDir} onClick={ordenBusqueda.clickHeader} />
                     <th className="p-3">Acción</th>
                   </tr>
@@ -722,6 +743,13 @@ export default function TransferenciasPage({ API_URL, idEquipoUsuario, idPartida
                       <td className="p-3 text-slate-300">{j.edad}</td>
                       <td className="p-3 font-bold text-white">{formatOverall(j)}</td>
                       <td className="p-3 font-bold text-sky-400">${j.valor_mercado.toLocaleString('es-AR')}</td>
+                      <td className="p-3">
+                        {j.en_transferible ? (
+                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-950 text-amber-300 border border-amber-500/40">Transferible</span>
+                        ) : j.es_cedible ? (
+                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-violet-950 text-violet-300 border border-violet-500/40">Préstamo</span>
+                        ) : <span className="text-slate-500">—</span>}
+                      </td>
                       <td className="p-3">
                         {esJuvenil ? (
                           j.fecha_fin_contrato ? (

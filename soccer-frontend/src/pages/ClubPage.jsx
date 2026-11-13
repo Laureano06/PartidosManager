@@ -196,7 +196,7 @@ export default function ClubPage({ API_URL, idEquipoUsuario, idPartida, clubActi
       <div className="bg-[#121e36] border border-slate-800 rounded-2xl p-6 flex items-center justify-between flex-wrap gap-4">
         <div className="flex items-center gap-3">
           {equipo.escudo_url ? (
-            <img src={equipo.escudo_url} alt={equipo.nombre} className="w-12 h-12 rounded-lg object-contain bg-[#0b1326] border border-slate-800" />
+            <img src={equipo.escudo_url.startsWith('/static/') ? `${API_URL}${equipo.escudo_url}` : equipo.escudo_url} alt={equipo.nombre} className="w-12 h-12 rounded-lg object-contain bg-[#0b1326] border border-slate-800" />
           ) : (
             <div className="w-12 h-12 rounded-lg bg-sky-950 border border-sky-500/40 text-sky-300 font-black flex items-center justify-center">
               {equipo.nombre.replace(/^.*-\s*/, '').trim().charAt(0).toUpperCase()}
